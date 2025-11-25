@@ -1,0 +1,16 @@
+model_name: "Qwen/Qwen2.5-3B-Instruct"
+output_dir: "outputs/qwen-grpo"
+max_seq_length: 4096
+load_in_4bit: true
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+learning_rate: 2e-5
+batch_size: 4
+gradient_accumulation_steps: 4
+max_steps: 500
+warmup_steps: 50
+logging_steps: 10
+save_steps: 100
+group_size: 4  # Number of generations per prompt for GRPO

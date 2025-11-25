@@ -1,0 +1,12 @@
+model_name: "meta-llama/Meta-Llama-3-8B-Instruct"
+output_dir: "outputs/bitnet-llama"
+max_seq_length: 2048
+load_in_4bit: false # BitNet training requires specific handling, usually full precision or specific quantization aware training
+use_bitnet: true # Custom flag to trigger BitNet specific logic
+learning_rate: 1e-4
+batch_size: 2
+gradient_accumulation_steps: 8
+max_steps: 1000
+warmup_steps: 100
+logging_steps: 10
+save_steps: 200
