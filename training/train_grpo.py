@@ -51,6 +51,12 @@ def main():
         gpu_memory_utilization = 0.6, # Adjust based on hardware
     )
 
+    model = FastLanguageModel.for_inference(model)
+    
+    # Torch Compile Optimization
+    print("Compiling model with torch.compile...")
+    model = torch.compile(model)
+
     model = FastLanguageModel.get_peft_model(
         model,
         r = config.get('lora_r', 16),
@@ -61,6 +67,10 @@ def main():
         use_gradient_checkpointing = "unsloth",
         random_state = 3407,
     )
+
+    # Torch Compile Optimization
+    print("Compiling model with torch.compile...")
+    model = torch.compile(model)
 
     # Load Dataset (Placeholder - replace with actual dataset path)
     # dataset = load_dataset("your_dataset_name", split="train")

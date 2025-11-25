@@ -24,6 +24,10 @@ def main():
     )
     FastLanguageModel.for_inference(model)
 
+    # Torch Compile Optimization
+    print("Compiling model with torch.compile...")
+    model = torch.compile(model)
+
     inputs = tokenizer([args.prompt], return_tensors = "pt").to("cuda")
 
     print("Generating...")
