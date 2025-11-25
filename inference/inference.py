@@ -20,6 +20,7 @@ def main():
         max_seq_length = 2048,
         dtype = None,
         load_in_4bit = True,
+        kv_cache_quantization = True, # Enable 8-bit KV cache
     )
     FastLanguageModel.for_inference(model)
 
