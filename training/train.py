@@ -155,9 +155,9 @@ def main():
         random_state = 3407,
     )
     
-    # Torch Compile
-    print("Compiling model with torch.compile...")
-    model = torch.compile(model)
+    # Torch Compile Optimization
+    # print("Compiling model with torch.compile...")
+    # model = torch.compile(model)
 
     if args.mode == "grpo":
         train_grpo(model, tokenizer, config)
