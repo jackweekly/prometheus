@@ -35,6 +35,16 @@ Enable ternary hooks by setting `ternary_mode` in `training/config_jamba.yaml` t
 - `ask_human` is interactive via stdin; adapt to your UX (e.g., queue/GUI/API) as needed.
 - Research mode: set `research_sources` (RSS/Atom feeds like arXiv) and `research_keywords` in `training/config_jamba.yaml`. The loop will create summarize tasks from the feeds and reward summaries that hit the keywords.
 
+### Self-improvement harness
+- `self_improve.py` applies model-proposed unified diffs safely.
+- Defaults to dry-run; use `--apply` to actually patch the working tree.
+- Allowed edit targets are limited to project directories/files; adjust `ALLOWED_DIRS` in `self_improve.py` if needed.
+Example:
+```bash
+python self_improve.py --patch-file proposed.diff       # dry run
+python self_improve.py --patch-file proposed.diff --apply
+```
+
 ### Data Generation
 To generate a synthetic dataset:
 ```bash
