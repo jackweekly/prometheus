@@ -7,6 +7,7 @@ This project provides the foundation for training and deploying efficient, self-
 - `training/`: Configuration and scripts for training Jamba.
 - `data/`: Scripts for generating synthetic datasets.
 - `inference/`: Scripts for running inference.
+- `docs/ternary_jamba.md`: Playbook for BitNet-style ternary experiments on Jamba-mini.
 
 ## Setup
 
@@ -23,6 +24,8 @@ GRPO LoRA fine-tune:
 python training/train.py --config training/config_jamba.yaml
 ```
 Tune the HF repo id in `training/config_jamba.yaml` for your chosen Jamba-mini checkpoint.
+
+Ternary (BitNet-style) plan: see `docs/ternary_jamba.md` for experiment ladder (adapters → selective ternary → full ternary), training knobs, and evaluation targets.
 
 ### Data Generation
 To generate a synthetic dataset:
