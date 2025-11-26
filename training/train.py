@@ -10,6 +10,7 @@ import re
 import signal
 import os
 from rich.console import Console
+from rich.table import Table
 
 console = Console()
 
@@ -244,6 +245,17 @@ def train_grpo(model, tokenizer, config):
         rewards = score_completions(tasks, completions, config)
         avg_reward = sum(rewards) / max(1, len(rewards))
         console.log(f"[Iter {iteration}] tasks={len(tasks)} avg_reward={avg_reward:.3f}")
+
+        if config.get("log_samples", True):
+            table = Table(title=f"Iteration {iteration} samples", show_lines=False)
+            table.add_column("Prompt", overflow="fold", max_width=60)
+            table.add_column("Completion", overflow="fold", max_width=60)
+            table.add_column("Reward")
+            for i, (task, comp, rw) in enumerate(zip(tasks, completions, rewards)):
+                if i >= config.get("log_samples_limit", 2):
+                    break
+                table.add_row(task.get("prompt", "")[:200], comp.strip()[:200], f"{rw:.2f}")
+            console.print(table)
 
         # Save state so we can resume
         save_state({"iteration": iteration + 1, "last_avg_reward": avg_reward, "last_tasks": tasks})

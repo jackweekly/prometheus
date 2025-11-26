@@ -28,3 +28,6 @@ research_keywords: ["transformer", "mamba", "bitnet", "grpo", "self-improvement"
 human_feedback: false
 # Max iterations for the online loop; null for unbounded
 max_iters: null
+# Log a few samples (prompt/completion/reward) per iteration
+log_samples: true
+log_samples_limit: 2
