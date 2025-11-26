@@ -177,17 +177,18 @@ def compute_reward(task: Dict[str, Any], completion: str) -> Tuple[float, str]:
         return 0.0, "no keywords provided"
     # Numeric exact/approx check
     answer = str(task.get("answer", "")).strip()
-    comp_num = None
-    ans_num = None
-    try:
-        comp_num = float(re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", completion)[0])
-        ans_num = float(re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", answer)[0])
-    except Exception:
-        pass
-    if comp_num is not None and ans_num is not None:
-        if abs(comp_num - ans_num) < 1e-3:
-            return 1.0, f"numeric match {comp_num}"
-        return 0.0, f"numeric mismatch {comp_num} vs {ans_num}"
+    numbers = re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", completion)
+    ans_numbers = re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", answer)
+    if numbers and ans_numbers:
+        try:
+            ans_num = float(ans_numbers[0])
+            for num_str in numbers:
+                num_val = float(num_str)
+                if abs(num_val - ans_num) < 1e-3:
+                    return 1.0, f"numeric match {num_val}"
+            return 0.0, f"numeric mismatch; found {numbers} vs {ans_num}"
+        except Exception:
+            pass
     if answer and answer in completion:
         return 1.0, "answer substring found"
     return 0.0, "no match"
@@ -256,9 +257,11 @@ def train_grpo(model, tokenizer, config):
     while True:
         tasks = fetch_tasks(config)
         prompts = [t["prompt"] for t in tasks]
+        # Encourage concise answers
+        prompts = [p + "\n\nReturn only the final answer/code. No explanation." for p in prompts]
         inputs = tokenizer(prompts, return_tensors="pt", padding=True, truncation=True).to(model.device)
         with torch.no_grad():
-            outputs = model.generate(**inputs, max_new_tokens=128)
+            outputs = model.generate(**inputs, max_new_tokens=config.get("max_new_tokens", 64))
         completions = tokenizer.batch_decode(outputs, skip_special_tokens=True)
 
         rewards, reasons = score_completions(tasks, completions, config)
