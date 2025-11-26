@@ -140,26 +140,52 @@ def main():
     import os
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name = config['model_name'],
-        max_seq_length = config.get('max_seq_length', 2048),
-        load_in_4bit = config.get('load_in_4bit', True),
-        fast_inference = False, 
-        max_lora_rank = config.get('lora_r', 16),
-        gpu_memory_utilization = 0.6,
-        device_map = {"": local_rank}, # Force model to specific GPU for DDP
-    )
+    if "mamba" in config['model_name'].lower():
+        print("Detected Mamba model. Using standard Transformers (Unsloth does not support Mamba compilation yet).")
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from peft import LoraConfig, get_peft_model
 
-    model = FastLanguageModel.get_peft_model(
-        model,
-        r = config.get('lora_r', 16),
-        target_modules = config.get('target_modules', ["q_proj", "k_proj", "v_proj", "o_proj"]),
-        lora_alpha = config.get('lora_alpha', 16),
-        lora_dropout = config.get('lora_dropout', 0),
-        bias = "none",
-        use_gradient_checkpointing = "unsloth", # True or "unsloth" for very long context
-        random_state = 3407,
-    )
+        model = AutoModelForCausalLM.from_pretrained(
+            config['model_name'],
+            device_map={"": local_rank},
+            trust_remote_code=True
+        )
+        tokenizer = AutoTokenizer.from_pretrained(config['model_name'])
+        
+        # Mamba specific LoRA config
+        peft_config = LoraConfig(
+            r=config.get('lora_r', 16),
+            lora_alpha=config.get('lora_alpha', 16),
+            target_modules=["in_proj", "out_proj", "x_proj", "dt_proj"], # Common Mamba targets
+            lora_dropout=config.get('lora_dropout', 0),
+            bias="none",
+            task_type="CAUSAL_LM"
+        )
+        model = get_peft_model(model, peft_config)
+        
+    else:
+        # Unsloth loading for Transformers (Llama, Qwen, etc.)
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name = config['model_name'],
+            max_seq_length = config.get('max_seq_length', 2048),
+            load_in_4bit = config.get('load_in_4bit', True),
+            fast_inference = False, 
+            max_lora_rank = config.get('lora_r', 16),
+            gpu_memory_utilization = 0.6,
+            device_map = {"": local_rank}, # Force model to specific GPU for DDP
+        )
+
+        model = FastLanguageModel.get_peft_model(
+            model,
+            r = config.get('lora_r', 16),
+            target_modules = config.get('target_modules', ["q_proj", "k_proj", "v_proj", "o_proj"]),
+            lora_alpha = config.get('lora_alpha', 16),
+            lora_dropout = config.get('lora_dropout', 0),
+            bias = "none",
+            use_gradient_checkpointing = "unsloth", # True or "unsloth" for very long context
+            random_state = 3407,
+        )
+
     print("Gradient checkpointing enabled.")
     
     # Torch Compile Optimization
