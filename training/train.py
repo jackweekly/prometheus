@@ -135,6 +135,9 @@ def main():
     config = load_config(args.config)
     print(f"Loading model: {config['model_name']} for mode: {args.mode}")
 
+    import os
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name = config['model_name'],
         max_seq_length = config.get('max_seq_length', 2048),
@@ -142,6 +145,7 @@ def main():
         fast_inference = False, 
         max_lora_rank = config.get('lora_r', 16),
         gpu_memory_utilization = 0.6,
+        device_map = {"": local_rank}, # Force model to specific GPU for DDP
     )
 
     model = FastLanguageModel.get_peft_model(
