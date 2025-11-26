@@ -3,7 +3,7 @@ import yaml
 import torch
 from trl import GRPOConfig, GRPOTrainer
 from transformers import TrainingArguments, Trainer
-from datasets import load_dataset
+from typing import List, Dict, Any
 
 def load_config(config_path):
     with open(config_path, 'r') as f:
@@ -52,19 +52,73 @@ def apply_ternary_hooks(model, mode: str, attention_keys, ssm_keys):
     print(f"Ternary mode '{mode}': attached hooks to {hooked} Linear modules.")
 
 
+def ask_human(queries: List[str]) -> List[str]:
+    """Placeholder for human-in-the-loop clarification. Currently just logs and returns empty answers."""
+    print("Human clarification requested for queries:")
+    for q in queries:
+        print(f"- {q}")
+    return [""] * len(queries)
+
+
+def fetch_tasks() -> List[Dict[str, Any]]:
+    """
+    Task source stub. In a network-enabled environment, replace this with HTTP fetch.
+    Returns a list of dicts with keys: prompt, answer (for auto-eval), and optional tests.
+    """
+    # Simple math/code-style tasks for self-play
+    return [
+        {"prompt": "Compute 17 * 23.", "answer": "391"},
+        {"prompt": "Write a Python function add(a, b) that returns their sum.", "answer": "def add(a, b):\n    return a + b", "tests": ["assert add(1,2)==3", "assert add(-1,1)==0"]},
+    ]
+
+
+def score_completions(tasks: List[Dict[str, Any]], completions: List[str]) -> List[float]:
+    """
+    Simple reward: exact string contains for math; code tested via exec if tests provided.
+    If low confidence, asks human (stub) for guidance.
+    """
+    rewards = []
+    ask = []
+    ask_idx = []
+    for i, (task, comp) in enumerate(zip(tasks, completions)):
+        if "tests" in task:
+            local_vars = {}
+            try:
+                exec(comp, {}, local_vars)  # Unsafe in general; acceptable for controlled tests
+                passed = True
+                for t in task["tests"]:
+                    exec(t, {}, local_vars)
+                rewards.append(1.0 if passed else 0.0)
+            except Exception:
+                rewards.append(0.0)
+        else:
+            rewards.append(1.0 if str(task["answer"]) in comp else 0.0)
+        if rewards[-1] == 0.0:
+            ask.append(f"Clarify/guide for task: {task['prompt']}")
+            ask_idx.append(i)
+    if ask:
+        human_answers = ask_human(ask)
+        for idx, hint in zip(ask_idx, human_answers):
+            # If human gives a hint, provide small reward bump to encourage exploration
+            if hint.strip():
+                rewards[idx] += 0.2
+    return rewards
+
+
 # --- GRPO Logic ---
 def train_grpo(model, tokenizer, config):
-    print("Starting GRPO Training...")
-    
-    # Placeholder reward function
-    def correctness_reward_func(prompts, completions, answer, **kwargs):
-        rewards = []
-        for completion, correct_answer in zip(completions, answer):
-            if correct_answer in completion:
-                rewards.append(1.0)
-            else:
-                rewards.append(0.0)
-        return rewards
+    print("Starting GRPO Training (online tasks, no static dataset)...")
+
+    tasks = fetch_tasks()
+
+    # Generate completions for each task
+    prompts = [t["prompt"] for t in tasks]
+    inputs = tokenizer(prompts, return_tensors="pt", padding=True, truncation=True).to(model.device)
+    with torch.no_grad():
+        outputs = model.generate(**inputs, max_new_tokens=128)
+    completions = tokenizer.batch_decode(outputs, skip_special_tokens=True)
+
+    rewards = score_completions(tasks, completions)
 
     training_args = GRPOConfig(
         output_dir = config['output_dir'],
@@ -85,12 +139,12 @@ def train_grpo(model, tokenizer, config):
     trainer = GRPOTrainer(
         model = model,
         processing_class = tokenizer,
-        reward_funcs = [correctness_reward_func],
+        reward_funcs = [lambda p, c, **kwargs: rewards],
         args = training_args,
-        train_dataset = None, # Pass dataset here
+        train_dataset = None, # Online tasks; no persistent dataset
     )
     # trainer.train()
-    print("GRPO Training setup complete (Placeholder execution).")
+    print("GRPO Training setup complete (Placeholder execution with online tasks).")
 
 def main():
     parser = argparse.ArgumentParser(description="Jamba-only GRPO Training Script")
