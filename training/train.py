@@ -311,13 +311,18 @@ def train_grpo(model, tokenizer, config):
             best_idx = max(range(len(rewards)), key=lambda i: rewards[i])
             good_samples.append((prompts[best_idx], completions[best_idx]))
         if good_samples:
+            texts = [f"{s[0]}\n{s[1]}" for s in good_samples]
             enc = tokenizer(
-                [s[0] for s in good_samples],
-                text_target=[s[1] for s in good_samples],
+                texts,
                 padding=True,
                 truncation=True,
                 max_length=config.get("max_seq_length", 2048),
             )
+            # Labels: same as input_ids but pad positions -> -100
+            labels = []
+            for ids, mask in zip(enc["input_ids"], enc["attention_mask"]):
+                labels.append([tid if m == 1 else -100 for tid, m in zip(ids, mask)])
+            enc["labels"] = labels
             train_ds = PromptDataset(enc)
             sft_args = TrainingArguments(
                 output_dir=config["output_dir"],
@@ -328,6 +333,8 @@ def train_grpo(model, tokenizer, config):
                 logging_steps=1,
                 save_strategy="no",
                 remove_unused_columns=False,
+                gradient_checkpointing=True,
+                use_cache=False,
             )
             sft_trainer = Trainer(
                 model=model,
@@ -379,6 +386,9 @@ def main():
         torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
     )
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+    if tokenizer.pad_token is None and tokenizer.eos_token is not None:
+        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.pad_token_id = tokenizer.eos_token_id
     tokenizer.padding_side = "left"
     console.log("Model loaded.")
 
