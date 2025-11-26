@@ -40,6 +40,7 @@ def train_grpo(model, tokenizer, config):
         max_completion_length = 1024,
         num_generations = config.get('group_size', 4),
         report_to = "wandb",
+        dataloader_num_workers = config.get('dataloader_num_workers', 4), # Use system RAM/CPU for data loading
     )
 
     trainer = GRPOTrainer(
@@ -69,6 +70,7 @@ def train_spin(model, tokenizer, config):
         max_steps = config['max_steps'],
         logging_steps = config['logging_steps'],
         fp16 = True,
+        dataloader_num_workers = config.get('dataloader_num_workers', 4),
     )
 
     trainer = SPINTrainer(

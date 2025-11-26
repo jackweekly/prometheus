@@ -10,3 +10,4 @@ max_steps: 1000
 warmup_steps: 100
 logging_steps: 10
 save_steps: 200
+dataloader_num_workers: 16 # Utilize 193GB RAM for fast data pre-processing
