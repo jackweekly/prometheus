@@ -3,7 +3,9 @@ import yaml
 import torch
 from trl import GRPOConfig, GRPOTrainer
 from transformers import TrainingArguments, Trainer
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+import json
+import requests
 
 def load_config(config_path):
     with open(config_path, 'r') as f:
@@ -52,23 +54,49 @@ def apply_ternary_hooks(model, mode: str, attention_keys, ssm_keys):
     print(f"Ternary mode '{mode}': attached hooks to {hooked} Linear modules.")
 
 
-def ask_human(queries: List[str]) -> List[str]:
-    """Placeholder for human-in-the-loop clarification. Currently just logs and returns empty answers."""
-    print("Human clarification requested for queries:")
+def ask_human(queries: List[str], interactive: bool = True) -> List[str]:
+    """
+    Human-in-the-loop clarification. If interactive, read from stdin; otherwise just logs.
+    Returns a list of hints aligned with queries.
+    """
+    hints = []
     for q in queries:
-        print(f"- {q}")
-    return [""] * len(queries)
+        print(f"Human clarification requested for task: {q}")
+        if interactive:
+            try:
+                hint = input("Provide a hint (or leave blank): ").strip()
+            except EOFError:
+                hint = ""
+        else:
+            hint = ""
+        hints.append(hint)
+    return hints
 
 
-def fetch_tasks() -> List[Dict[str, Any]]:
+def fetch_tasks(config) -> List[Dict[str, Any]]:
     """
-    Task source stub. In a network-enabled environment, replace this with HTTP fetch.
-    Returns a list of dicts with keys: prompt, answer (for auto-eval), and optional tests.
+    Task source: tries HTTP if task_url provided; falls back to built-in tasks.
+    Expects JSON list of {prompt: str, answer: str, tests?: [str]}.
     """
-    # Simple math/code-style tasks for self-play
+    task_url = config.get("task_url")
+    if task_url:
+        try:
+            resp = requests.get(task_url, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            if isinstance(data, list):
+                return data
+        except Exception as e:
+            print(f"Warning: HTTP task fetch failed ({e}); falling back to local tasks.")
+    # Fallback tasks
     return [
         {"prompt": "Compute 17 * 23.", "answer": "391"},
-        {"prompt": "Write a Python function add(a, b) that returns their sum.", "answer": "def add(a, b):\n    return a + b", "tests": ["assert add(1,2)==3", "assert add(-1,1)==0"]},
+        {
+            "prompt": "Write a Python function add(a, b) that returns their sum.",
+            "answer": "def add(a, b):\n    return a + b",
+            "tests": ["assert add(1,2)==3", "assert add(-1,1)==0"],
+        },
+        {"prompt": "What is the capital of France?", "answer": "Paris"},
     ]
 
 
@@ -97,7 +125,7 @@ def score_completions(tasks: List[Dict[str, Any]], completions: List[str]) -> Li
             ask.append(f"Clarify/guide for task: {task['prompt']}")
             ask_idx.append(i)
     if ask:
-        human_answers = ask_human(ask)
+        human_answers = ask_human(ask, interactive=True)
         for idx, hint in zip(ask_idx, human_answers):
             # If human gives a hint, provide small reward bump to encourage exploration
             if hint.strip():
@@ -109,7 +137,7 @@ def score_completions(tasks: List[Dict[str, Any]], completions: List[str]) -> Li
 def train_grpo(model, tokenizer, config):
     print("Starting GRPO Training (online tasks, no static dataset)...")
 
-    tasks = fetch_tasks()
+    tasks = fetch_tasks(config)
 
     # Generate completions for each task
     prompts = [t["prompt"] for t in tasks]

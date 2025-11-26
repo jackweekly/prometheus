@@ -17,3 +17,5 @@ target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj",
 group_size: 4  # Number of generations per prompt for GRPO
 # Ternary modes: "none" (default), "attention" (ternary attention/MLP), "full" (attention + SSM projections)
 ternary_mode: "none"
+# Optional: URL returning JSON list of tasks [{prompt, answer, tests?}]
+task_url: ""
