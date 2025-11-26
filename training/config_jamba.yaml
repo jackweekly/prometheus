@@ -24,3 +24,7 @@ research_sources:
   - "https://export.arxiv.org/rss/cs.CL"
 # Keywords to reward in summaries (case-insensitive)
 research_keywords: ["transformer", "mamba", "bitnet", "grpo", "self-improvement"]
+# Enable/disable interactive human hints
+human_feedback: false
+# Max iterations for the online loop; null for unbounded
+max_iters: null

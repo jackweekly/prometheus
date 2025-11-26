@@ -93,7 +93,7 @@ def ask_human(queries: List[str], interactive: bool = True) -> List[str]:
     hints = []
     for q in queries:
         print(f"Human clarification requested for task: {q}")
-        if interactive:
+        if interactive and not STOP_REQUESTED:
             try:
                 hint = input("Provide a hint (or leave blank): ").strip()
             except EOFError:
@@ -158,7 +158,7 @@ def fetch_tasks(config) -> List[Dict[str, Any]]:
     ]
 
 
-def score_completions(tasks: List[Dict[str, Any]], completions: List[str]) -> List[float]:
+def score_completions(tasks: List[Dict[str, Any]], completions: List[str], config) -> List[float]:
     """
     Simple reward: exact string contains for math; code tested via exec if tests provided.
     If low confidence, asks human (stub) for guidance.
@@ -166,6 +166,7 @@ def score_completions(tasks: List[Dict[str, Any]], completions: List[str]) -> Li
     rewards = []
     ask = []
     ask_idx = []
+    human_feedback = config.get("human_feedback", False)
     for i, (task, comp) in enumerate(zip(tasks, completions)):
         if "tests" in task:
             local_vars = {}
@@ -185,7 +186,7 @@ def score_completions(tasks: List[Dict[str, Any]], completions: List[str]) -> Li
                 rewards.append(0.0)
         else:
             rewards.append(1.0 if str(task["answer"]) in comp else 0.0)
-        if rewards[-1] == 0.0:
+        if rewards[-1] == 0.0 and human_feedback and not STOP_REQUESTED:
             ask.append(f"Clarify/guide for task: {task['prompt']}")
             ask_idx.append(i)
     if ask:
@@ -240,7 +241,7 @@ def train_grpo(model, tokenizer, config):
             outputs = model.generate(**inputs, max_new_tokens=128)
         completions = tokenizer.batch_decode(outputs, skip_special_tokens=True)
 
-        rewards = score_completions(tasks, completions)
+        rewards = score_completions(tasks, completions, config)
         avg_reward = sum(rewards) / max(1, len(rewards))
         console.log(f"[Iter {iteration}] tasks={len(tasks)} avg_reward={avg_reward:.3f}")
 
