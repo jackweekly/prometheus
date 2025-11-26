@@ -1,4 +1,4 @@
-model_name: "ai21labs/Jamba-mini" # Replace with the exact HF repo id you intend to use
+model_name: "Qwen/Qwen2.5-1.5B-Instruct" # Public default; override with MODEL_ID env
 model_type: "jamba"
 output_dir: "outputs/jamba-mini-grpo"
 max_seq_length: 16384

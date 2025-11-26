@@ -259,7 +259,9 @@ def main():
     signal.signal(signal.SIGTERM, handle_stop)
 
     config = load_config(args.config)
-    model_id = os.environ.get("MODEL_ID", config["model_name"])
+    # In some environments globals can be shadowed; re-import defensively
+    import os as _os
+    model_id = _os.environ.get("MODEL_ID", config["model_name"])
     print(f"Loading model: {model_id} (Jamba-only pipeline)")
 
     import os

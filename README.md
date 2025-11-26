@@ -23,8 +23,11 @@ Single entrypoint (online GRPO loop with Jamba):
 ```bash
 make run
 ```
-Tune the HF repo id in `training/config_jamba.yaml` for your chosen Jamba-mini checkpoint.
-You can override at runtime with `MODEL_ID=your/model-id make run`. If the repo is gated/private, set `HF_TOKEN` (e.g., `export HF_TOKEN=...` or `huggingface-cli login`).
+Default model is public (`Qwen/Qwen2.5-1.5B-Instruct`). Override at runtime with:
+```bash
+MODEL_ID=your/model-id make run
+```
+If the repo is gated/private, set `HF_TOKEN` (e.g., `export HF_TOKEN=...` or `huggingface-cli login`).
 
 Ternary (BitNet-style) plan: see `docs/ternary_jamba.md` for experiment ladder (adapters → selective ternary → full ternary), training knobs, and evaluation targets.
 Enable ternary hooks by setting `ternary_mode` in `training/config_jamba.yaml` to `attention` (selective) or `full` (attention + SSM).
