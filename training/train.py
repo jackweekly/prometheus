@@ -156,7 +156,7 @@ def main():
         peft_config = LoraConfig(
             r=config.get('lora_r', 16),
             lora_alpha=config.get('lora_alpha', 16),
-            target_modules=["in_proj", "out_proj", "x_proj", "dt_proj"], # Common Mamba targets
+            target_modules=["in_proj", "x_proj", "dt_proj"], # Removed incompatible 'out_proj'
             lora_dropout=config.get('lora_dropout', 0),
             bias="none",
             task_type="CAUSAL_LM"
