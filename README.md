@@ -19,9 +19,9 @@ This project provides the foundation for training and deploying efficient, self-
 ## Usage
 
 ### Training
-GRPO LoRA fine-tune:
+Single entrypoint (online GRPO loop with Jamba):
 ```bash
-python training/train.py --config training/config_jamba.yaml
+make run
 ```
 Tune the HF repo id in `training/config_jamba.yaml` for your chosen Jamba-mini checkpoint.
 

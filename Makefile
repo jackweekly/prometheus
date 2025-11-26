@@ -1,6 +1,6 @@
 # Makefile for Prometheus LLM Project
 
-.PHONY: install test benchmark train-qwen train-bitnet train-spin train-rag clean
+.PHONY: install test benchmark run clean clean-cache
 
 # Install dependencies
 install:
@@ -17,21 +17,9 @@ benchmark:
 	@echo "Running Vending-Bench..."
 	python3 benchmarks/vending_eval.py
 
-# Training Targets
-train-qwen:
-	torchrun --nproc_per_node=2 training/train.py --mode grpo --config training/config_qwen.yaml
-
-train-bitnet:
-	torchrun --nproc_per_node=2 training/train.py --mode grpo --config training/config_bitnet.yaml
-
-train-mamba:
-	torchrun --nproc_per_node=2 training/train.py --mode grpo --config training/config_mamba.yaml
-
-train-spin:
-	torchrun --nproc_per_node=2 training/train.py --mode spin --config training/config_qwen.yaml
-
-train-rag:
-	torchrun --nproc_per_node=2 training/train.py --mode rag --config training/config_qwen.yaml
+# Single entrypoint: run the online GRPO loop with Jamba
+run:
+	python3 training/train.py --config training/config_jamba.yaml
 
 # Data Generation
 generate-data:
