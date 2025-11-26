@@ -19,19 +19,19 @@ benchmark:
 
 # Training Targets
 train-qwen:
-	python3 training/train_grpo.py --config training/config_qwen.yaml
+	python3 training/train.py --mode grpo --config training/config_qwen.yaml
 
 train-bitnet:
-	python3 training/train_grpo.py --config training/config_bitnet.yaml
+	python3 training/train.py --mode grpo --config training/config_bitnet.yaml
 
 train-mamba:
-	python3 training/train_grpo.py --config training/config_mamba.yaml
+	python3 training/train.py --mode grpo --config training/config_mamba.yaml
 
 train-spin:
-	python3 training/train_spin.py
+	python3 training/train.py --mode spin --config training/config_qwen.yaml
 
 train-rag:
-	python3 training/train_rag_rl.py
+	python3 training/train.py --mode rag --config training/config_qwen.yaml
 
 # Data Generation
 generate-data:
