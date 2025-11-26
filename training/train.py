@@ -321,10 +321,10 @@ def train_grpo(model, tokenizer, config):
             train_ds = PromptDataset(enc)
             sft_args = TrainingArguments(
                 output_dir=config["output_dir"],
-                per_device_train_batch_size=config.get("self_train_batch_size", 1),
+                per_device_train_batch_size=int(config.get("self_train_batch_size", 1)),
                 num_train_epochs=1,
-                max_steps=config.get("self_train_steps", 5),
-                learning_rate=config.get("self_train_lr", 5e-6),
+                max_steps=int(config.get("self_train_steps", 5)),
+                learning_rate=float(config.get("self_train_lr", 5e-6)),
                 logging_steps=1,
                 save_strategy="no",
                 remove_unused_columns=False,
