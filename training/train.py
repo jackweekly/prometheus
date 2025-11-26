@@ -9,6 +9,9 @@ import requests
 import re
 import signal
 import os
+from rich.console import Console
+
+console = Console()
 
 def load_config(config_path):
     with open(config_path, 'r') as f:
@@ -196,12 +199,12 @@ def score_completions(tasks: List[Dict[str, Any]], completions: List[str]) -> Li
 
 # --- GRPO Logic ---
 def train_grpo(model, tokenizer, config):
-    print("Starting GRPO Training (online tasks, no static dataset)...")
+    console.log("Starting GRPO Training (online tasks, no static dataset)...")
 
     state = load_state()
     start_iter = state.get("iteration", 0)
-    max_iters = config.get("max_iters", 1)
-    print(f"Resuming at iteration {start_iter}; configured max_iters={max_iters}")
+    max_iters = config.get("max_iters")  # None = unbounded
+    console.log(f"Resuming at iteration {start_iter}; max_iters={'∞' if max_iters is None else max_iters}")
 
     training_args = GRPOConfig(
         output_dir = config['output_dir'],
@@ -228,7 +231,8 @@ def train_grpo(model, tokenizer, config):
     )
 
     global STOP_REQUESTED
-    for iteration in range(start_iter, max_iters):
+    iteration = start_iter
+    while True:
         tasks = fetch_tasks(config)
         prompts = [t["prompt"] for t in tasks]
         inputs = tokenizer(prompts, return_tensors="pt", padding=True, truncation=True).to(model.device)
@@ -238,17 +242,22 @@ def train_grpo(model, tokenizer, config):
 
         rewards = score_completions(tasks, completions)
         avg_reward = sum(rewards) / max(1, len(rewards))
-        print(f"[Iter {iteration}] tasks={len(tasks)} avg_reward={avg_reward:.3f}")
+        console.log(f"[Iter {iteration}] tasks={len(tasks)} avg_reward={avg_reward:.3f}")
 
         # Save state so we can resume
         save_state({"iteration": iteration + 1, "last_avg_reward": avg_reward, "last_tasks": tasks})
 
         # Early stop if requested
         if STOP_REQUESTED:
-            print("Graceful stop: state saved.")
+            console.log("Graceful stop: state saved.")
             break
 
-    print("GRPO loop complete (placeholder without optimizer step).")
+        iteration += 1
+        if max_iters is not None and iteration >= max_iters:
+            console.log("Reached max_iters limit.")
+            break
+
+    console.log("GRPO loop complete (placeholder without optimizer step).")
 
 def main():
     parser = argparse.ArgumentParser(description="Jamba-only GRPO Training Script")
@@ -262,16 +271,16 @@ def main():
     # In some environments globals can be shadowed; re-import defensively
     import os as _os
     model_id = _os.environ.get("MODEL_ID", config["model_name"])
-    print(f"Loading model: {model_id} (Jamba-only pipeline)")
+    console.log(f"Loading model: {model_id} (Jamba-only pipeline)")
 
     import os
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     
-    print("Detected Jamba model. Loading with HF + PEFT for hybrid attention/SSM layers.")
+    console.log("Detected Jamba model. Loading with HF + PEFT for hybrid attention/SSM layers.")
     from transformers import AutoModelForCausalLM, AutoTokenizer
     from peft import LoraConfig, get_peft_model
 
-    print("Downloading/loading model weights...") 
+    console.log("Downloading/loading model weights...")
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         device_map="auto",
@@ -280,7 +289,8 @@ def main():
         torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
     )
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-    print("Model loaded.")
+    tokenizer.padding_side = "left"
+    console.log("Model loaded.")
 
     target_modules = config.get(
         "target_modules",
@@ -316,7 +326,7 @@ def main():
     )
     model = get_peft_model(model, peft_config)
 
-    print("Gradient checkpointing enabled.")
+    console.log("Gradient checkpointing enabled.")
     
     # Torch Compile Optimization
     # print("Compiling model with torch.compile...")
