@@ -41,3 +41,6 @@ generate-data:
 clean:
 	rm -rf outputs/*
 	rm -rf __pycache__
+
+clean-cache:
+	rm -rf ~/.cache/huggingface/hub
