@@ -69,10 +69,10 @@ class VendingSimulation:
         High prices might reduce sales. Low prices might hurt profit margins.
         
         Choose one of the following actions:
-        1. {"action": "increase_price", "value": 0.25}
-        2. {"action": "decrease_price", "value": 0.25}
-        3. {"action": "restock", "value": 50}
-        4. {"action": "do_nothing"}
+        1. {{"action": "increase_price", "value": 0.25}}
+        2. {{"action": "decrease_price", "value": 0.25}}
+        3. {{"action": "restock", "value": 50}}
+        4. {{"action": "do_nothing"}}
         """
         return prompt
 
