@@ -19,19 +19,19 @@ benchmark:
 
 # Training Targets
 train-qwen:
-	python3 training/train.py --mode grpo --config training/config_qwen.yaml
+	torchrun --nproc_per_node=2 training/train.py --mode grpo --config training/config_qwen.yaml
 
 train-bitnet:
-	python3 training/train.py --mode grpo --config training/config_bitnet.yaml
+	torchrun --nproc_per_node=2 training/train.py --mode grpo --config training/config_bitnet.yaml
 
 train-mamba:
-	python3 training/train.py --mode grpo --config training/config_mamba.yaml
+	torchrun --nproc_per_node=2 training/train.py --mode grpo --config training/config_mamba.yaml
 
 train-spin:
-	python3 training/train.py --mode spin --config training/config_qwen.yaml
+	torchrun --nproc_per_node=2 training/train.py --mode spin --config training/config_qwen.yaml
 
 train-rag:
-	python3 training/train.py --mode rag --config training/config_qwen.yaml
+	torchrun --nproc_per_node=2 training/train.py --mode rag --config training/config_qwen.yaml
 
 # Data Generation
 generate-data:
