@@ -19,3 +19,8 @@ group_size: 4  # Number of generations per prompt for GRPO
 ternary_mode: "none"
 # Optional: URL returning JSON list of tasks [{prompt, answer, tests?}]
 task_url: ""
+# Optional: research RSS/Atom feeds (e.g., arXiv)
+research_sources:
+  - "https://export.arxiv.org/rss/cs.CL"
+# Keywords to reward in summaries (case-insensitive)
+research_keywords: ["transformer", "mamba", "bitnet", "grpo", "self-improvement"]

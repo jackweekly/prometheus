@@ -31,8 +31,9 @@ Enable ternary hooks by setting `ternary_mode` in `training/config_jamba.yaml` t
 ### Online “learn by doing” loop (no static dataset)
 - `training/train.py` now fetches tasks from `fetch_tasks()` (stub) and scores completions with `score_completions()` (exact math or simple code tests). No dataset files are used.
 - A human-in-the-loop clarification hook (`ask_human`) is stubbed; replace with your own prompt/feedback mechanism.
-- To plug in real web tasks, set `task_url` in `training/config_jamba.yaml`; `fetch_tasks` will HTTP GET JSON `[ { "prompt": "...", "answer": "...", "tests": ["assert ..."] }, ... ]` and fall back to local tasks on failure.
+- To plug in real web tasks, set `task_url` in `training/config_jamba.yaml`; `fetch_tasks` will HTTP GET JSON `[ { "prompt": "...", "answer": "...", "tests": ["assert ..."] }, ... ]` and fall back to research/local tasks on failure.
 - `ask_human` is interactive via stdin; adapt to your UX (e.g., queue/GUI/API) as needed.
+- Research mode: set `research_sources` (RSS/Atom feeds like arXiv) and `research_keywords` in `training/config_jamba.yaml`. The loop will create summarize tasks from the feeds and reward summaries that hit the keywords.
 
 ### Data Generation
 To generate a synthetic dataset:

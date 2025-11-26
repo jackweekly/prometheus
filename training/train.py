@@ -6,6 +6,7 @@ from transformers import TrainingArguments, Trainer
 from typing import List, Dict, Any, Optional
 import json
 import requests
+import re
 
 def load_config(config_path):
     with open(config_path, 'r') as f:
@@ -73,9 +74,31 @@ def ask_human(queries: List[str], interactive: bool = True) -> List[str]:
     return hints
 
 
+def fetch_research(config) -> List[Dict[str, Any]]:
+    """
+    Fetch research items from configured RSS/Atom feeds (e.g., arXiv). Returns list of tasks with keywords for scoring.
+    """
+    sources = config.get("research_sources", [])
+    keywords = config.get("research_keywords", [])
+    tasks = []
+    for src in sources:
+        try:
+            resp = requests.get(src, timeout=10)
+            resp.raise_for_status()
+            text = resp.text
+            entries = re.findall(r"<title>([^<]+)</title>.*?<summary>([^<]+)</summary>", text, flags=re.DOTALL)
+            # skip the feed-level title (first)
+            for title, summary in entries[1:]:
+                prompt = f"Summarize the paper '{title}' and list key contributions."
+                tasks.append({"prompt": prompt, "answer": summary.strip(), "keywords": keywords})
+        except Exception as e:
+            print(f"Warning: research fetch failed from {src} ({e})")
+    return tasks
+
+
 def fetch_tasks(config) -> List[Dict[str, Any]]:
     """
-    Task source: tries HTTP if task_url provided; falls back to built-in tasks.
+    Task source: tries HTTP if task_url provided; then research feeds; falls back to built-in tasks.
     Expects JSON list of {prompt: str, answer: str, tests?: [str]}.
     """
     task_url = config.get("task_url")
@@ -87,7 +110,12 @@ def fetch_tasks(config) -> List[Dict[str, Any]]:
             if isinstance(data, list):
                 return data
         except Exception as e:
-            print(f"Warning: HTTP task fetch failed ({e}); falling back to local tasks.")
+            print(f"Warning: HTTP task fetch failed ({e}); falling back to research/local tasks.")
+
+    research_items = fetch_research(config)
+    if research_items:
+        return research_items
+
     # Fallback tasks
     return [
         {"prompt": "Compute 17 * 23.", "answer": "391"},
@@ -118,6 +146,12 @@ def score_completions(tasks: List[Dict[str, Any]], completions: List[str]) -> Li
                     exec(t, {}, local_vars)
                 rewards.append(1.0 if passed else 0.0)
             except Exception:
+                rewards.append(0.0)
+        elif "keywords" in task:
+            if task["keywords"]:
+                kw_hits = sum(1 for kw in task["keywords"] if kw.lower() in comp.lower())
+                rewards.append(min(1.0, kw_hits / max(1, len(task["keywords"]))))
+            else:
                 rewards.append(0.0)
         else:
             rewards.append(1.0 if str(task["answer"]) in comp else 0.0)
