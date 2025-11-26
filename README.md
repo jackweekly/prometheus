@@ -26,6 +26,7 @@ python training/train.py --config training/config_jamba.yaml
 Tune the HF repo id in `training/config_jamba.yaml` for your chosen Jamba-mini checkpoint.
 
 Ternary (BitNet-style) plan: see `docs/ternary_jamba.md` for experiment ladder (adapters → selective ternary → full ternary), training knobs, and evaluation targets.
+Enable ternary hooks by setting `ternary_mode` in `training/config_jamba.yaml` to `attention` (selective) or `full` (attention + SSM).
 
 ### Data Generation
 To generate a synthetic dataset:

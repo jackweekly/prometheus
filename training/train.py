@@ -9,6 +9,49 @@ def load_config(config_path):
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
+# --- Ternary helpers ---
+def ternary_weight(w: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
+    """Absmean scaling + STE ternary projection to {-1, 0, 1}."""
+    scale = w.detach().abs().mean()
+    w_hat = torch.clamp(torch.round(w / (scale + eps)), -1, 1)
+    # STE: gradient is 1 through w
+    return w + (w_hat - w).detach()
+
+
+def attach_ternary_forward(module: torch.nn.Module):
+    """Replace Linear forward with ternary-weighted linear via a forward hook."""
+    def hook(_module, inputs, output=None):
+        x = inputs[0]
+        w_q = ternary_weight(_module.weight)
+        return torch.nn.functional.linear(x, w_q, _module.bias)
+    module.register_forward_hook(hook)
+
+
+def apply_ternary_hooks(model, mode: str, attention_keys, ssm_keys):
+    """
+    mode: "none" | "attention" | "full"
+    attention_keys: substrings to match attention/MLP projections
+    ssm_keys: substrings to match SSM projections
+    """
+    if mode == "none":
+        print("Ternary mode: none (standard training).")
+        return
+
+    def should_hook(name: str):
+        if mode == "full":
+            return any(k in name for k in attention_keys + ssm_keys)
+        if mode == "attention":
+            return any(k in name for k in attention_keys)
+        return False
+
+    hooked = 0
+    for name, module in model.named_modules():
+        if isinstance(module, torch.nn.Linear) and should_hook(name):
+            attach_ternary_forward(module)
+            hooked += 1
+    print(f"Ternary mode '{mode}': attached hooks to {hooked} Linear modules.")
+
+
 # --- GRPO Logic ---
 def train_grpo(model, tokenizer, config):
     print("Starting GRPO Training...")
@@ -85,6 +128,14 @@ def main():
             "x_proj",
             "dt_proj",
         ],
+    )
+
+    ternary_mode = config.get("ternary_mode", "none")  # "none" | "attention" | "full"
+    apply_ternary_hooks(
+        model,
+        mode=ternary_mode,
+        attention_keys=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        ssm_keys=["in_proj", "x_proj", "dt_proj"],
     )
 
     peft_config = LoraConfig(

@@ -15,3 +15,5 @@ lora_dropout: 0.05
 # Covers both attention and SSM projections; adjust if the model exposes different module names
 target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj", "in_proj", "x_proj", "dt_proj"]
 group_size: 4  # Number of generations per prompt for GRPO
+# Ternary modes: "none" (default), "attention" (ternary attention/MLP), "full" (attention + SSM projections)
+ternary_mode: "none"
