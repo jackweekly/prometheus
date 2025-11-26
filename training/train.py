@@ -151,9 +151,10 @@ def main():
         lora_alpha = config.get('lora_alpha', 16),
         lora_dropout = config.get('lora_dropout', 0),
         bias = "none",
-        use_gradient_checkpointing = "unsloth",
+        use_gradient_checkpointing = "unsloth", # True or "unsloth" for very long context
         random_state = 3407,
     )
+    print("Gradient checkpointing enabled.")
     
     # Torch Compile Optimization
     # print("Compiling model with torch.compile...")
