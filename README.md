@@ -1,10 +1,10 @@
-# Efficient Self-Improving LLM Foundation
+# Efficient Self-Improving LLM Foundation (Jamba-only)
 
 This project provides the foundation for training and deploying efficient, self-improving Large Language Models (LLMs) using Unsloth (GRPO) and Distilabel.
 
 ## Structure
 
-- `training/`: Configuration and scripts for training models (Qwen, BitNet).
+- `training/`: Configuration and scripts for training Jamba.
 - `data/`: Scripts for generating synthetic datasets.
 - `inference/`: Scripts for running inference.
 
@@ -18,10 +18,11 @@ This project provides the foundation for training and deploying efficient, self-
 ## Usage
 
 ### Training
-To train a model using GRPO:
+GRPO LoRA fine-tune:
 ```bash
-python training/train_grpo.py --config training/config_qwen.yaml
+python training/train.py --config training/config_jamba.yaml
 ```
+Tune the HF repo id in `training/config_jamba.yaml` for your chosen Jamba-mini checkpoint.
 
 ### Data Generation
 To generate a synthetic dataset:

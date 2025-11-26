@@ -1,0 +1,17 @@
+model_name: "ai21labs/Jamba-mini" # Replace with the exact HF repo id you intend to use
+model_type: "jamba"
+output_dir: "outputs/jamba-mini-grpo"
+max_seq_length: 16384
+learning_rate: 1e-4
+batch_size: 1
+gradient_accumulation_steps: 8
+max_steps: 800
+warmup_steps: 80
+logging_steps: 10
+save_steps: 200
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+# Covers both attention and SSM projections; adjust if the model exposes different module names
+target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj", "in_proj", "x_proj", "dt_proj"]
+group_size: 4  # Number of generations per prompt for GRPO

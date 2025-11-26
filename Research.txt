@@ -131,6 +131,35 @@ Metric
 	This data confirms that BitNet b1.58 satisfies the user's requirement for a model that is "cheap to run" and "optimized" by fundamentally changing the unit of computation.10
 ________________
 
+2.5. Applying Ternary Principles to Jamba (Hybrid Attention + SSM)
+
+Jamba-mini mixes Transformer attention with SSM blocks. The BitNet b1.58 ideas can be ported, but SSM layers need extra care. Here is a concrete path:
+
+* Paths to try (in order of safety):
+  1) Ternary adapters only: freeze base Jamba; insert LoRA-style adapters that are trained and then quantized to {-1,0,1}. Gains: cheap adapter matmuls without risking base weights.
+  2) Selective ternary: ternarize attention projections and MLP (q/k/v/o, gate/up/down); keep SSM projections (in_proj, x_proj, dt_proj) at 4–8b. Yields most FLOP savings while keeping the SSM stable.
+  3) Full ternary with RMSNorm injection: inject a learnable RMSNorm before every linear in both attention and SSM blocks; train with STE + absmean scaling to heal the quant noise.
+
+* Training mechanics:
+  - Quantizer: absmean scaling per weight matrix, clamp to [-1,1], STE in backward.
+  - Optimizer: AdamW/Adafactor, LR ~3e-5–1e-4, longer warmup, grad clip (0.5–1.0).
+  - Regularizers: L2 on latent weights; optional sparsity penalty to encourage zeros.
+  - Curriculum: start with shorter context (4k–8k) during healing, then ramp to 16k+; consider two-stage (attention ternary first, then SSM).
+
+* Kernel/inference reality:
+  - No off-the-shelf bitnet.cpp for Jamba SSM+attention. CPU path easier; GPU would need custom CUDA for SSM scan + ternary ops. Expect to prototype in PyTorch first for quality, then write kernels if gains are good.
+  - GGUF/GGML currently lack ternary for Jamba; plan for a bespoke runner.
+
+* Evaluation targets:
+  - Quality: perplexity on held-out; reasoning (GSM8K-lite); long-context recall (LongBench subset).
+  - Efficiency: tokens/s vs 4-bit baseline; VRAM/CPU RAM; power draw proxy (nvidia-smi or psutil on M-series); stability on 100k+ contexts.
+
+* Proposed experiment order:
+  1) Ternary adapters on attention + SSM projections; base frozen.
+  2) Selective ternary: attention ternary, SSM at 4–8b; RMSNorm injection.
+  3) Full ternary everywhere with RMSNorm; cautious LR/warmup; expand context after healing.
+________________
+
 
 3. Breaking the Quadratic Barrier: Linear-Time Sequence Modeling
 
