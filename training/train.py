@@ -334,7 +334,6 @@ def train_grpo(model, tokenizer, config):
                 save_strategy="no",
                 remove_unused_columns=False,
                 gradient_checkpointing=True,
-                use_cache=False,
             )
             sft_trainer = Trainer(
                 model=model,
