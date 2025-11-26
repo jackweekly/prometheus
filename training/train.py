@@ -271,12 +271,16 @@ def main():
     from transformers import AutoModelForCausalLM, AutoTokenizer
     from peft import LoraConfig, get_peft_model
 
+    print("Downloading/loading model weights...") 
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
-        device_map={"": local_rank},
+        device_map="auto",
         trust_remote_code=True,
+        low_cpu_mem_usage=True,
+        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
     )
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+    print("Model loaded.")
 
     target_modules = config.get(
         "target_modules",
