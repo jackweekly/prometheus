@@ -259,7 +259,8 @@ def main():
     signal.signal(signal.SIGTERM, handle_stop)
 
     config = load_config(args.config)
-    print(f"Loading model: {config['model_name']} (Jamba-only pipeline)")
+    model_id = os.environ.get("MODEL_ID", config["model_name"])
+    print(f"Loading model: {model_id} (Jamba-only pipeline)")
 
     import os
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
@@ -269,11 +270,11 @@ def main():
     from peft import LoraConfig, get_peft_model
 
     model = AutoModelForCausalLM.from_pretrained(
-        config["model_name"],
+        model_id,
         device_map={"": local_rank},
         trust_remote_code=True,
     )
-    tokenizer = AutoTokenizer.from_pretrained(config["model_name"], trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
 
     target_modules = config.get(
         "target_modules",
