@@ -3,7 +3,7 @@ import yaml
 import torch
 from trl import GRPOConfig, GRPOTrainer
 from transformers import TrainingArguments, Trainer
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import json
 import requests
 import re
@@ -159,44 +159,63 @@ def fetch_tasks(config) -> List[Dict[str, Any]]:
     ]
 
 
-def score_completions(tasks: List[Dict[str, Any]], completions: List[str], config) -> List[float]:
+def compute_reward(task: Dict[str, Any], completion: str) -> Tuple[float, str]:
+    """Return reward and reason string."""
+    if "tests" in task:
+        local_vars = {}
+        try:
+            exec(completion, {}, local_vars)  # Unsafe in general; acceptable for controlled tests
+            for t in task["tests"]:
+                exec(t, {}, local_vars)
+            return 1.0, "code tests passed"
+        except Exception as e:
+            return 0.0, f"code test failed: {e}"
+    if "keywords" in task:
+        if task["keywords"]:
+            kw_hits = sum(1 for kw in task["keywords"] if kw.lower() in completion.lower())
+            return (min(1.0, kw_hits / max(1, len(task["keywords"]))), f"keywords hit {kw_hits}/{len(task['keywords'])}")
+        return 0.0, "no keywords provided"
+    # Numeric exact/approx check
+    answer = str(task.get("answer", "")).strip()
+    comp_num = None
+    ans_num = None
+    try:
+        comp_num = float(re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", completion)[0])
+        ans_num = float(re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", answer)[0])
+    except Exception:
+        pass
+    if comp_num is not None and ans_num is not None:
+        if abs(comp_num - ans_num) < 1e-3:
+            return 1.0, f"numeric match {comp_num}"
+        return 0.0, f"numeric mismatch {comp_num} vs {ans_num}"
+    if answer and answer in completion:
+        return 1.0, "answer substring found"
+    return 0.0, "no match"
+
+
+def score_completions(tasks: List[Dict[str, Any]], completions: List[str], config) -> Tuple[List[float], List[str]]:
     """
-    Simple reward: exact string contains for math; code tested via exec if tests provided.
-    If low confidence, asks human (stub) for guidance.
+    Reward with reasons. If human_feedback enabled, asks for hints on zero reward.
     """
     rewards = []
+    reasons = []
     ask = []
     ask_idx = []
     human_feedback = config.get("human_feedback", False)
     for i, (task, comp) in enumerate(zip(tasks, completions)):
-        if "tests" in task:
-            local_vars = {}
-            try:
-                exec(comp, {}, local_vars)  # Unsafe in general; acceptable for controlled tests
-                passed = True
-                for t in task["tests"]:
-                    exec(t, {}, local_vars)
-                rewards.append(1.0 if passed else 0.0)
-            except Exception:
-                rewards.append(0.0)
-        elif "keywords" in task:
-            if task["keywords"]:
-                kw_hits = sum(1 for kw in task["keywords"] if kw.lower() in comp.lower())
-                rewards.append(min(1.0, kw_hits / max(1, len(task["keywords"]))))
-            else:
-                rewards.append(0.0)
-        else:
-            rewards.append(1.0 if str(task["answer"]) in comp else 0.0)
-        if rewards[-1] == 0.0 and human_feedback and not STOP_REQUESTED:
+        reward, reason = compute_reward(task, comp)
+        rewards.append(reward)
+        reasons.append(reason)
+        if reward == 0.0 and human_feedback and not STOP_REQUESTED:
             ask.append(f"Clarify/guide for task: {task['prompt']}")
             ask_idx.append(i)
     if ask:
         human_answers = ask_human(ask, interactive=True)
         for idx, hint in zip(ask_idx, human_answers):
-            # If human gives a hint, provide small reward bump to encourage exploration
             if hint.strip():
                 rewards[idx] += 0.2
-    return rewards
+                reasons[idx] += " + human hint"
+    return rewards, reasons
 
 
 # --- GRPO Logic ---
@@ -242,7 +261,7 @@ def train_grpo(model, tokenizer, config):
             outputs = model.generate(**inputs, max_new_tokens=128)
         completions = tokenizer.batch_decode(outputs, skip_special_tokens=True)
 
-        rewards = score_completions(tasks, completions, config)
+        rewards, reasons = score_completions(tasks, completions, config)
         avg_reward = sum(rewards) / max(1, len(rewards))
         console.log(f"[Iter {iteration}] tasks={len(tasks)} avg_reward={avg_reward:.3f}")
 
@@ -251,10 +270,15 @@ def train_grpo(model, tokenizer, config):
             table.add_column("Prompt", overflow="fold", max_width=60)
             table.add_column("Completion", overflow="fold", max_width=60)
             table.add_column("Reward")
+            if config.get("log_reasons", True):
+                table.add_column("Reason", overflow="fold", max_width=40)
             for i, (task, comp, rw) in enumerate(zip(tasks, completions, rewards)):
                 if i >= config.get("log_samples_limit", 2):
                     break
-                table.add_row(task.get("prompt", "")[:200], comp.strip()[:200], f"{rw:.2f}")
+                row = [task.get("prompt", "")[:200], comp.strip()[:200], f"{rw:.2f}"]
+                if config.get("log_reasons", True):
+                    row.append(reasons[i])
+                table.add_row(*row)
             console.print(table)
 
         # Save state so we can resume
