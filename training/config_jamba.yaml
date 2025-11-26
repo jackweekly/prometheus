@@ -36,6 +36,6 @@ log_reasons: true
 # Max new tokens per completion (shorter encourages direct answers)
 max_new_tokens: 64
 # Self-train steps per iteration (SFT on high-reward samples)
-self_train_steps: 5
+self_train_steps: 1
 self_train_batch_size: 1
-self_train_lr: 5e-6
+self_train_lr: 2e-6

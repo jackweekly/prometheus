@@ -163,9 +163,12 @@ def fetch_tasks(config) -> List[Dict[str, Any]]:
 def compute_reward(task: Dict[str, Any], completion: str) -> Tuple[float, str]:
     """Return reward and reason string."""
     if "tests" in task:
+        # Extract first python code block
+        m = re.search(r"```(?:python)?\s*(.*?)```", completion, flags=re.DOTALL | re.IGNORECASE)
+        code = m.group(1) if m else completion
         local_vars = {}
         try:
-            exec(completion, {}, local_vars)  # Unsafe in general; acceptable for controlled tests
+            exec(code, {}, local_vars)  # Unsafe in general; acceptable for controlled tests
             for t in task["tests"]:
                 exec(t, {}, local_vars)
             return 1.0, "code tests passed"
@@ -176,17 +179,16 @@ def compute_reward(task: Dict[str, Any], completion: str) -> Tuple[float, str]:
             kw_hits = sum(1 for kw in task["keywords"] if kw.lower() in completion.lower())
             return (min(1.0, kw_hits / max(1, len(task["keywords"]))), f"keywords hit {kw_hits}/{len(task['keywords'])}")
         return 0.0, "no keywords provided"
-    # Numeric exact/approx check
+    # Numeric exact/approx check: use last number in completion
     answer = str(task.get("answer", "")).strip()
     numbers = re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", completion)
     ans_numbers = re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", answer)
     if numbers and ans_numbers:
         try:
             ans_num = float(ans_numbers[0])
-            for num_str in numbers:
-                num_val = float(num_str)
-                if abs(num_val - ans_num) < 1e-3:
-                    return 1.0, f"numeric match {num_val}"
+            num_val = float(numbers[-1])
+            if abs(num_val - ans_num) < 1e-3:
+                return 1.0, f"numeric match {num_val}"
             return 0.0, f"numeric mismatch; found {numbers} vs {ans_num}"
         except Exception:
             pass
@@ -271,9 +273,9 @@ def train_grpo(model, tokenizer, config):
         prompts = []
         for t in tasks:
             if "tests" in t:
-                prompts.append(t["prompt"] + "\n\nReturn a single python code block with the function only. No extra text.")
+                prompts.append(t["prompt"] + "\n\nReturn a single fenced python code block with the function only. No extra text.")
             elif "answer" in t:
-                prompts.append(t["prompt"] + "\n\nReturn only the numeric/string answer. No explanation.")
+                prompts.append(t["prompt"] + "\n\nReturn only one integer on a single line. No explanation.")
             else:
                 prompts.append(t["prompt"])
         inputs = tokenizer(prompts, return_tensors="pt", padding=True, truncation=True).to(model.device)
@@ -306,12 +308,10 @@ def train_grpo(model, tokenizer, config):
 
         # Self-train on good samples (simple SFT on high-reward completions)
         good_samples = [(p, c) for p, c, r in zip(prompts, completions, rewards) if r >= 1.0]
-        if not good_samples and rewards:
-            # fallback: take best sample
-            best_idx = max(range(len(rewards)), key=lambda i: rewards[i])
-            good_samples.append((prompts[best_idx], completions[best_idx]))
+        if not good_samples:
+            console.log("No high-reward samples; skipping self-train this iteration.")
         if good_samples:
-            texts = [f"{s[0]}\n{s[1]}" for s in good_samples]
+            texts = [s[1] for s in good_samples]  # train only on completions
             enc = tokenizer(
                 texts,
                 padding=True,
