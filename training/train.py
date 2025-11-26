@@ -11,6 +11,7 @@ import signal
 import os
 from rich.console import Console
 from rich.table import Table
+from torch.utils.data import Dataset
 
 console = Console()
 
@@ -219,6 +220,17 @@ def score_completions(tasks: List[Dict[str, Any]], completions: List[str], confi
     return rewards, reasons
 
 
+class PromptDataset(Dataset):
+    def __init__(self, encodings):
+        self.encodings = encodings
+
+    def __len__(self):
+        return len(self.encodings["input_ids"])
+
+    def __getitem__(self, idx):
+        return {key: torch.tensor(val[idx]) for key, val in self.encodings.items()}
+
+
 # --- GRPO Logic ---
 def train_grpo(model, tokenizer, config):
     console.log("Starting GRPO Training (online tasks, no static dataset)...")
@@ -256,9 +268,14 @@ def train_grpo(model, tokenizer, config):
     iteration = start_iter
     while True:
         tasks = fetch_tasks(config)
-        prompts = [t["prompt"] for t in tasks]
-        # Encourage concise answers
-        prompts = [p + "\n\nReturn only the final answer/code. No explanation." for p in prompts]
+        prompts = []
+        for t in tasks:
+            if "tests" in t:
+                prompts.append(t["prompt"] + "\n\nReturn a single python code block with the function only. No extra text.")
+            elif "answer" in t:
+                prompts.append(t["prompt"] + "\n\nReturn only the numeric/string answer. No explanation.")
+            else:
+                prompts.append(t["prompt"])
         inputs = tokenizer(prompts, return_tensors="pt", padding=True, truncation=True).to(model.device)
         with torch.no_grad():
             outputs = model.generate(**inputs, max_new_tokens=config.get("max_new_tokens", 64))
@@ -286,6 +303,39 @@ def train_grpo(model, tokenizer, config):
 
         # Save state so we can resume
         save_state({"iteration": iteration + 1, "last_avg_reward": avg_reward, "last_tasks": tasks})
+
+        # Self-train on good samples (simple SFT on high-reward completions)
+        good_samples = [(p, c) for p, c, r in zip(prompts, completions, rewards) if r >= 1.0]
+        if not good_samples and rewards:
+            # fallback: take best sample
+            best_idx = max(range(len(rewards)), key=lambda i: rewards[i])
+            good_samples.append((prompts[best_idx], completions[best_idx]))
+        if good_samples:
+            enc = tokenizer(
+                [s[0] for s in good_samples],
+                text_target=[s[1] for s in good_samples],
+                padding=True,
+                truncation=True,
+                max_length=config.get("max_seq_length", 2048),
+            )
+            train_ds = PromptDataset(enc)
+            sft_args = TrainingArguments(
+                output_dir=config["output_dir"],
+                per_device_train_batch_size=config.get("self_train_batch_size", 1),
+                num_train_epochs=1,
+                max_steps=config.get("self_train_steps", 5),
+                learning_rate=config.get("self_train_lr", 5e-6),
+                logging_steps=1,
+                save_strategy="no",
+                remove_unused_columns=False,
+            )
+            sft_trainer = Trainer(
+                model=model,
+                args=sft_args,
+                train_dataset=train_ds,
+                tokenizer=tokenizer,
+            )
+            sft_trainer.train()
 
         # Early stop if requested
         if STOP_REQUESTED:
