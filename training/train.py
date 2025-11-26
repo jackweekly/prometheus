@@ -7,10 +7,37 @@ from typing import List, Dict, Any, Optional
 import json
 import requests
 import re
+import signal
+import os
 
 def load_config(config_path):
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
+
+# --- State handling ---
+STATE_PATH = "state/run_state.json"
+STOP_REQUESTED = False
+
+def handle_stop(signum, frame):
+    global STOP_REQUESTED
+    STOP_REQUESTED = True
+    print("Stop requested, finishing current cycle...")
+
+
+def load_state(path: str = STATE_PATH) -> Dict[str, Any]:
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def save_state(data: Dict[str, Any], path: str = STATE_PATH):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
 
 # --- Ternary helpers ---
 def ternary_weight(w: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
@@ -171,16 +198,10 @@ def score_completions(tasks: List[Dict[str, Any]], completions: List[str]) -> Li
 def train_grpo(model, tokenizer, config):
     print("Starting GRPO Training (online tasks, no static dataset)...")
 
-    tasks = fetch_tasks(config)
-
-    # Generate completions for each task
-    prompts = [t["prompt"] for t in tasks]
-    inputs = tokenizer(prompts, return_tensors="pt", padding=True, truncation=True).to(model.device)
-    with torch.no_grad():
-        outputs = model.generate(**inputs, max_new_tokens=128)
-    completions = tokenizer.batch_decode(outputs, skip_special_tokens=True)
-
-    rewards = score_completions(tasks, completions)
+    state = load_state()
+    start_iter = state.get("iteration", 0)
+    max_iters = config.get("max_iters", 1)
+    print(f"Resuming at iteration {start_iter}; configured max_iters={max_iters}")
 
     training_args = GRPOConfig(
         output_dir = config['output_dir'],
@@ -195,23 +216,47 @@ def train_grpo(model, tokenizer, config):
         max_completion_length = 1024,
         num_generations = config.get('group_size', 4),
         report_to = "wandb",
-        dataloader_num_workers = config.get('dataloader_num_workers', 4), # Use system RAM/CPU for data loading
+        dataloader_num_workers = config.get('dataloader_num_workers', 4),
     )
 
     trainer = GRPOTrainer(
         model = model,
         processing_class = tokenizer,
-        reward_funcs = [lambda p, c, **kwargs: rewards],
+        reward_funcs = [lambda p, c, **kwargs: kwargs.get("rewards", [])],
         args = training_args,
         train_dataset = None, # Online tasks; no persistent dataset
     )
-    # trainer.train()
-    print("GRPO Training setup complete (Placeholder execution with online tasks).")
+
+    global STOP_REQUESTED
+    for iteration in range(start_iter, max_iters):
+        tasks = fetch_tasks(config)
+        prompts = [t["prompt"] for t in tasks]
+        inputs = tokenizer(prompts, return_tensors="pt", padding=True, truncation=True).to(model.device)
+        with torch.no_grad():
+            outputs = model.generate(**inputs, max_new_tokens=128)
+        completions = tokenizer.batch_decode(outputs, skip_special_tokens=True)
+
+        rewards = score_completions(tasks, completions)
+        avg_reward = sum(rewards) / max(1, len(rewards))
+        print(f"[Iter {iteration}] tasks={len(tasks)} avg_reward={avg_reward:.3f}")
+
+        # Save state so we can resume
+        save_state({"iteration": iteration + 1, "last_avg_reward": avg_reward, "last_tasks": tasks})
+
+        # Early stop if requested
+        if STOP_REQUESTED:
+            print("Graceful stop: state saved.")
+            break
+
+    print("GRPO loop complete (placeholder without optimizer step).")
 
 def main():
     parser = argparse.ArgumentParser(description="Jamba-only GRPO Training Script")
     parser.add_argument("--config", type=str, required=True, help="Path to config yaml")
     args = parser.parse_args()
+
+    signal.signal(signal.SIGINT, handle_stop)
+    signal.signal(signal.SIGTERM, handle_stop)
 
     config = load_config(args.config)
     print(f"Loading model: {config['model_name']} (Jamba-only pipeline)")
