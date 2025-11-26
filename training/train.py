@@ -118,7 +118,7 @@ def train_rag_rl(model, tokenizer, config):
     print(f"Retrieved: {doc}")
     
     prompt = f"Context: {doc}\nQuestion: Tell me about physics\nAnswer:"
-    inputs = tokenizer([prompt], return_tensors="pt").to("cuda")
+    inputs = tokenizer([prompt], return_tensors="pt").to(model.device)
     outputs = model.generate(**inputs, max_new_tokens=64)
     response = tokenizer.decode(outputs[0], skip_special_tokens=True)
     print(f"Response: {response}")
