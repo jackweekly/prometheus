@@ -1,8 +1,11 @@
-model_name: "Qwen/Qwen2.5-1.5B-Instruct" # Public default; override with MODEL_ID env
+model_name: "Qwen/Qwen2.5-1.5B-Instruct" # Student (Actor)
+teacher_model_name: "deepseek-ai/DeepSeek-R1-Distill-Llama-8B" # Teacher (Critic)
+teacher_device: "cuda:1"
+student_device: "cuda:0"
 model_type: "jamba"
 output_dir: "outputs/jamba-mini-grpo"
 max_seq_length: 16384
-learning_rate: 1e-4
+learning_rate: 5e-6
 batch_size: 1
 gradient_accumulation_steps: 8
 max_steps: 800

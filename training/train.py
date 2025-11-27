@@ -234,7 +234,7 @@ class PromptDataset(Dataset):
 
 
 # --- GRPO Logic ---
-def train_grpo(model, tokenizer, config):
+def train_grpo(model, tokenizer, config, teacher_model=None, teacher_tokenizer=None):
     console.log("Starting GRPO Training (online tasks, no static dataset)...")
 
     state = load_state()
@@ -300,6 +300,36 @@ def train_grpo(model, tokenizer, config):
         completions = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
 
         rewards, reasons = score_completions(tasks, completions, config)
+
+        # Teacher Correction (Critic/Teacher)
+        if teacher_model:
+            for i, (r, t) in enumerate(zip(rewards, tasks)):
+                if r < 1.0: # Student failed
+                    # Format for Teacher
+                    teacher_messages = [{"role": "user", "content": t["prompt"]}]
+                    if "tests" in t:
+                        teacher_messages[0]["content"] += "\n\nReturn a single fenced python code block with the function only. No extra text."
+                    elif "answer" in t:
+                        teacher_messages[0]["content"] += "\n\nReturn only one integer on a single line. No explanation."
+                    
+                    teacher_inputs = teacher_tokenizer.apply_chat_template(teacher_messages, return_tensors="pt", add_generation_prompt=True).to(teacher_model.device)
+                    
+                    with torch.no_grad():
+                        teacher_outputs = teacher_model.generate(
+                            teacher_inputs, 
+                            max_new_tokens=256, 
+                            temperature=0.6,
+                            do_sample=True
+                        )
+                    
+                    # Decode Teacher Output
+                    teacher_completion = teacher_tokenizer.decode(teacher_outputs[0][teacher_inputs.shape[1]:], skip_special_tokens=True)
+                    
+                    # Update completion and reward
+                    completions[i] = teacher_completion
+                    rewards[i] = 1.0 
+                    reasons[i] += " -> Teacher Corrected"
+
         avg_reward = sum(rewards) / max(1, len(rewards))
         console.log(f"[Iter {iteration}] tasks={len(tasks)} avg_reward={avg_reward:.3f}")
 
@@ -407,6 +437,19 @@ def main():
     tokenizer.padding_side = "left"
     console.log("Model loaded.")
 
+    # Load Teacher Model (if configured)
+    teacher_model = None
+    teacher_tokenizer = None
+    if config.get("teacher_model_name"):
+        console.log(f"Loading Teacher: {config['teacher_model_name']} on {config.get('teacher_device', 'cuda:1')}")
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        teacher_tokenizer = AutoTokenizer.from_pretrained(config["teacher_model_name"])
+        teacher_model = AutoModelForCausalLM.from_pretrained(
+            config["teacher_model_name"], 
+            torch_dtype=torch.bfloat16,
+            device_map=config.get("teacher_device", "cuda:1")
+        )
+
     target_modules = config.get(
         "target_modules",
         [
@@ -446,7 +489,7 @@ def main():
     # Torch Compile Optimization
     # print("Compiling model with torch.compile...")
     # model = torch.compile(model)
-    train_grpo(model, tokenizer, config)
+    train_grpo(model, tokenizer, config, teacher_model=teacher_model, teacher_tokenizer=teacher_tokenizer)
 
 if __name__ == "__main__":
     main()
