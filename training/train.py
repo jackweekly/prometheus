@@ -463,7 +463,36 @@ def train_grpo(model, tokenizer, config, teacher_model=None, teacher_tokenizer=N
         start_reward = session_stats["reward_history"][0]
         end_reward = session_stats["reward_history"][-1]
         console.print(f"\nReward Trend: {start_reward:.2f} -> {end_reward:.2f}")
+    
+    # Teacher Recommendations
+    if teacher_model:
+        console.print("\n[bold magenta]Generating Teacher Recommendations...[/bold magenta]")
+        advice_prompt = (
+            f"You are an AI optimization expert overseeing the training of a smaller student model.\n"
+            f"Session Stats:\n"
+            f"- Total Iterations: {session_stats['iterations']}\n"
+            f"- Student Independence Rate: {independence_rate:.1f}%\n"
+            f"- Teacher Interventions: {session_stats['teacher_interventions']}\n"
+            f"- Reward Trend: {start_reward:.2f} -> {end_reward:.2f}\n\n"
+            f"Based on this, provide 3 concise, actionable recommendations for the user to improve training. "
+            f"Focus on hyperparameters (learning rate, batch size), task difficulty, or curriculum adjustments. "
+            f"Be specific and brief."
+        )
         
+        advice_messages = [{"role": "user", "content": advice_prompt}]
+        advice_inputs = teacher_tokenizer.apply_chat_template(advice_messages, return_tensors="pt", add_generation_prompt=True).to(teacher_model.device)
+        
+        with torch.no_grad():
+            advice_outputs = teacher_model.generate(
+                advice_inputs, 
+                max_new_tokens=256, 
+                temperature=0.7,
+                do_sample=True
+            )
+        advice_text = teacher_tokenizer.decode(advice_outputs[0][advice_inputs.shape[1]:], skip_special_tokens=True)
+        
+        console.print(Panel(advice_text, title="Teacher's Advice", style="magenta"))
+
     console.rule("[bold green]End of Session[/bold green]")
     console.log("GRPO loop complete.")
 
