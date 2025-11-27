@@ -1,65 +1,35 @@
-    # Suppress warnings
-    import logging
-    logging.getLogger("transformers").setLevel(logging.ERROR)
-    import warnings
-    warnings.filterwarnings("ignore")
+import argparse
+import yaml
+import torch
+from trl import GRPOConfig, GRPOTrainer
+from transformers import TrainingArguments, Trainer
+from typing import List, Dict, Any, Optional, Tuple
+import json
+import requests
+import re
+import signal
+import os
+from rich.console import Console
+from rich.table import Table
+from torch.utils.data import Dataset
 
-    from rich.live import Live
-    from rich.panel import Panel
-    from rich.text import Text
+# Suppress warnings
+import logging
+logging.getLogger("transformers").setLevel(logging.ERROR)
+import warnings
+warnings.filterwarnings("ignore")
 
-    # ... (inside loop) ...
-    
-    iteration = start_iter
-    with Live(console=console, refresh_per_second=4) as live:
-        while True:
-            live.update(Panel(f"Fetching tasks for Iteration {iteration}...", title="Status", style="blue"))
-            tasks = fetch_tasks(config)
-            
-            # ... (formatting prompts) ...
-            
-            live.update(Panel(f"Student generating on {len(tasks)} tasks...", title="Status", style="yellow"))
-            inputs = tokenizer(formatted_prompts, return_tensors="pt", padding=True, truncation=True).to(model.device)
-            with torch.no_grad():
-                outputs = model.generate(...) # (keep existing args)
-            
-            # ... (decoding) ...
-            
-            rewards, reasons = score_completions(tasks, completions, config)
+from rich.live import Live
+from rich.panel import Panel
+from rich.text import Text
 
-            # Teacher Correction
-            if teacher_model:
-                for i, (r, t) in enumerate(zip(rewards, tasks)):
-                    if r < 1.0:
-                        live.update(Panel(f"Teacher correcting task {i+1}/{len(tasks)}...", title="Status", style="magenta"))
-                        # ... (teacher generation logic) ...
-                        reasons[i] = "[green]Teacher Corrected[/green]" # Color code
+console = Console()
 
-            avg_reward = sum(rewards) / max(1, len(rewards))
-            
-            # Create summary table
-            table = Table(title=f"Iteration {iteration} Summary (Avg Reward: {avg_reward:.2f})", box=None)
-            table.add_column("Task", style="cyan", no_wrap=True)
-            table.add_column("Completion", style="white")
-            table.add_column("Reward", justify="right")
-            table.add_column("Source", style="italic")
+def load_config(config_path):
+    with open(config_path, 'r') as f:
+        return yaml.safe_load(f)
 
-            for i, (task, comp, rw, reason) in enumerate(zip(tasks, completions, rewards, reasons)):
-                if i >= config.get("log_samples_limit", 3): break
-                
-                # Truncate for display
-                prompt_short = task.get("prompt", "")[:40].replace("\n", " ") + "..."
-                comp_short = comp.strip()[:40].replace("\n", " ") + "..."
-                
-                reward_style = "green" if rw >= 1.0 else "red"
-                source = "Teacher" if "Teacher" in reason else "Student"
-                
-                table.add_row(prompt_short, comp_short, f"[{reward_style}]{rw:.1f}[/{reward_style}]", source)
-            
-            live.update(table)
-            console.print(table) # Print permanently
-            
-            # ... (rest of loop) ...
+# ... (rest of imports and helpers are fine, skipping to train_grpo) ...
 from transformers import TrainingArguments, Trainer
 from typing import List, Dict, Any, Optional, Tuple
 import json
@@ -326,136 +296,146 @@ def train_grpo(model, tokenizer, config, teacher_model=None, teacher_tokenizer=N
 
     global STOP_REQUESTED
     iteration = start_iter
-    while True:
-        tasks = fetch_tasks(config)
-        formatted_prompts = []
-        for t in tasks:
-            # Construct the user message
-            content = t["prompt"]
-            if "tests" in t:
-                content += "\n\nReturn a single fenced python code block with the function only. No extra text."
-            elif "answer" in t:
-                content += "\n\nReturn only one integer on a single line. No explanation."
+    
+    with Live(console=console, refresh_per_second=4) as live:
+        while True:
+            live.update(Panel(f"Fetching tasks for Iteration {iteration}...", title="Status", style="blue"))
+            tasks = fetch_tasks(config)
+            formatted_prompts = []
+            for t in tasks:
+                # Construct the user message
+                content = t["prompt"]
+                if "tests" in t:
+                    content += "\n\nReturn a single fenced python code block with the function only. No extra text."
+                elif "answer" in t:
+                    content += "\n\nReturn only one integer on a single line. No explanation."
+                
+                # Apply chat template
+                messages = [{"role": "user", "content": content}]
+                formatted_prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                formatted_prompts.append(formatted_prompt)
+
+            live.update(Panel(f"Student generating on {len(tasks)} tasks...", title="Status", style="yellow"))
+            inputs = tokenizer(formatted_prompts, return_tensors="pt", padding=True, truncation=True).to(model.device)
+            with torch.no_grad():
+                outputs = model.generate(
+                    **inputs, 
+                    max_new_tokens=config.get("max_new_tokens", 64),
+                    temperature=config.get("temperature", 0.7),
+                    top_p=config.get("top_p", 0.9),
+                    repetition_penalty=config.get("repetition_penalty", 1.0),
+                    do_sample=True
+                )
             
-            # Apply chat template
-            messages = [{"role": "user", "content": content}]
-            formatted_prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-            formatted_prompts.append(formatted_prompt)
+            # Slice outputs to only include new tokens
+            new_tokens = outputs[:, inputs["input_ids"].shape[1]:]
+            completions = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
 
-        inputs = tokenizer(formatted_prompts, return_tensors="pt", padding=True, truncation=True).to(model.device)
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs, 
-                max_new_tokens=config.get("max_new_tokens", 64),
-                temperature=config.get("temperature", 0.7),
-                top_p=config.get("top_p", 0.9),
-                repetition_penalty=config.get("repetition_penalty", 1.0),
-                do_sample=True
-            )
-        
-        # Slice outputs to only include new tokens
-        new_tokens = outputs[:, inputs["input_ids"].shape[1]:]
-        completions = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
+            rewards, reasons = score_completions(tasks, completions, config)
 
-        rewards, reasons = score_completions(tasks, completions, config)
+            # Teacher Correction (Critic/Teacher)
+            if teacher_model:
+                for i, (r, t) in enumerate(zip(rewards, tasks)):
+                    if r < 1.0: # Student failed
+                        live.update(Panel(f"Teacher correcting task {i+1}/{len(tasks)}...", title="Status", style="magenta"))
+                        # Format for Teacher
+                        teacher_messages = [{"role": "user", "content": t["prompt"]}]
+                        if "tests" in t:
+                            teacher_messages[0]["content"] += "\n\nReturn a single fenced python code block with the function only. No extra text."
+                        elif "answer" in t:
+                            teacher_messages[0]["content"] += "\n\nReturn only one integer on a single line. No explanation."
+                        
+                        teacher_inputs = teacher_tokenizer.apply_chat_template(teacher_messages, return_tensors="pt", add_generation_prompt=True).to(teacher_model.device)
+                        
+                        with torch.no_grad():
+                            teacher_outputs = teacher_model.generate(
+                                teacher_inputs, 
+                                max_new_tokens=256, 
+                                temperature=0.6,
+                                do_sample=True
+                            )
+                        
+                        # Decode Teacher Output
+                        teacher_completion = teacher_tokenizer.decode(teacher_outputs[0][teacher_inputs.shape[1]:], skip_special_tokens=True)
+                        
+                        # Update completion and reward
+                        completions[i] = teacher_completion
+                        rewards[i] = 1.0 
+                        reasons[i] = "[green]Teacher Corrected[/green]"
 
-        # Teacher Correction (Critic/Teacher)
-        if teacher_model:
-            for i, (r, t) in enumerate(zip(rewards, tasks)):
-                if r < 1.0: # Student failed
-                    # Format for Teacher
-                    teacher_messages = [{"role": "user", "content": t["prompt"]}]
-                    if "tests" in t:
-                        teacher_messages[0]["content"] += "\n\nReturn a single fenced python code block with the function only. No extra text."
-                    elif "answer" in t:
-                        teacher_messages[0]["content"] += "\n\nReturn only one integer on a single line. No explanation."
-                    
-                    teacher_inputs = teacher_tokenizer.apply_chat_template(teacher_messages, return_tensors="pt", add_generation_prompt=True).to(teacher_model.device)
-                    
-                    with torch.no_grad():
-                        teacher_outputs = teacher_model.generate(
-                            teacher_inputs, 
-                            max_new_tokens=256, 
-                            temperature=0.6,
-                            do_sample=True
-                        )
-                    
-                    # Decode Teacher Output
-                    teacher_completion = teacher_tokenizer.decode(teacher_outputs[0][teacher_inputs.shape[1]:], skip_special_tokens=True)
-                    
-                    # Update completion and reward
-                    completions[i] = teacher_completion
-                    rewards[i] = 1.0 
-                    reasons[i] += " -> Teacher Corrected"
+            avg_reward = sum(rewards) / max(1, len(rewards))
+            
+            # Create summary table
+            table = Table(title=f"Iteration {iteration} Summary (Avg Reward: {avg_reward:.2f})", box=None)
+            table.add_column("Task", style="cyan", no_wrap=True)
+            table.add_column("Completion", style="white")
+            table.add_column("Reward", justify="right")
+            table.add_column("Source", style="italic")
 
-        avg_reward = sum(rewards) / max(1, len(rewards))
-        console.log(f"[Iter {iteration}] tasks={len(tasks)} avg_reward={avg_reward:.3f}")
+            for i, (task, comp, rw, reason) in enumerate(zip(tasks, completions, rewards, reasons)):
+                if i >= config.get("log_samples_limit", 3): break
+                
+                # Truncate for display
+                prompt_short = task.get("prompt", "")[:40].replace("\n", " ") + "..."
+                comp_short = comp.strip()[:40].replace("\n", " ") + "..."
+                
+                reward_style = "green" if rw >= 1.0 else "red"
+                source = "Teacher" if "Teacher" in str(reason) else "Student"
+                
+                table.add_row(prompt_short, comp_short, f"[{reward_style}]{rw:.1f}[/{reward_style}]", source)
+            
+            live.update(table)
+            console.print(table) # Print permanently
 
-        if config.get("log_samples", True):
-            table = Table(title=f"Iteration {iteration} samples", show_lines=False)
-            table.add_column("Prompt", overflow="fold", max_width=60)
-            table.add_column("Completion", overflow="fold", max_width=60)
-            table.add_column("Reward")
-            if config.get("log_reasons", True):
-                table.add_column("Reason", overflow="fold", max_width=40)
-            for i, (task, comp, rw) in enumerate(zip(tasks, completions, rewards)):
-                if i >= config.get("log_samples_limit", 2):
-                    break
-                row = [task.get("prompt", "")[:200], comp.strip()[:200], f"{rw:.2f}"]
-                if config.get("log_reasons", True):
-                    row.append(reasons[i])
-                table.add_row(*row)
-            console.print(table)
+            # Save state so we can resume
+            save_state({"iteration": iteration + 1, "last_avg_reward": avg_reward, "last_tasks": tasks})
 
-        # Save state so we can resume
-        save_state({"iteration": iteration + 1, "last_avg_reward": avg_reward, "last_tasks": tasks})
+            # Self-train on good samples (simple SFT on high-reward completions)
+            good_samples = [(p, c) for p, c, r in zip(formatted_prompts, completions, rewards) if r >= 1.0]
+            if not good_samples:
+                console.log("No high-reward samples; skipping self-train this iteration.")
+            if good_samples:
+                texts = [s[1] for s in good_samples]  # train only on completions
+                enc = tokenizer(
+                    texts,
+                    padding=True,
+                    truncation=True,
+                    max_length=config.get("max_seq_length", 2048),
+                )
+                # Labels: same as input_ids but pad positions -> -100
+                labels = []
+                for ids, mask in zip(enc["input_ids"], enc["attention_mask"]):
+                    labels.append([tid if m == 1 else -100 for tid, m in zip(ids, mask)])
+                enc["labels"] = labels
+                train_ds = PromptDataset(enc)
+                sft_args = TrainingArguments(
+                    output_dir=config["output_dir"],
+                    per_device_train_batch_size=int(config.get("self_train_batch_size", 1)),
+                    num_train_epochs=1,
+                    max_steps=int(config.get("self_train_steps", 5)),
+                    learning_rate=float(config.get("self_train_lr", 5e-6)),
+                    logging_steps=1,
+                    save_strategy="no",
+                    remove_unused_columns=False,
+                    gradient_checkpointing=True,
+                )
+                sft_trainer = Trainer(
+                    model=model,
+                    args=sft_args,
+                    train_dataset=train_ds,
+                    processing_class=tokenizer,
+                )
+                sft_trainer.train()
 
-        # Self-train on good samples (simple SFT on high-reward completions)
-        good_samples = [(p, c) for p, c, r in zip(formatted_prompts, completions, rewards) if r >= 1.0]
-        if not good_samples:
-            console.log("No high-reward samples; skipping self-train this iteration.")
-        if good_samples:
-            texts = [s[1] for s in good_samples]  # train only on completions
-            enc = tokenizer(
-                texts,
-                padding=True,
-                truncation=True,
-                max_length=config.get("max_seq_length", 2048),
-            )
-            # Labels: same as input_ids but pad positions -> -100
-            labels = []
-            for ids, mask in zip(enc["input_ids"], enc["attention_mask"]):
-                labels.append([tid if m == 1 else -100 for tid, m in zip(ids, mask)])
-            enc["labels"] = labels
-            train_ds = PromptDataset(enc)
-            sft_args = TrainingArguments(
-                output_dir=config["output_dir"],
-                per_device_train_batch_size=int(config.get("self_train_batch_size", 1)),
-                num_train_epochs=1,
-                max_steps=int(config.get("self_train_steps", 5)),
-                learning_rate=float(config.get("self_train_lr", 5e-6)),
-                logging_steps=1,
-                save_strategy="no",
-                remove_unused_columns=False,
-                gradient_checkpointing=True,
-            )
-            sft_trainer = Trainer(
-                model=model,
-                args=sft_args,
-                train_dataset=train_ds,
-                processing_class=tokenizer,
-            )
-            sft_trainer.train()
+            # Early stop if requested
+            if STOP_REQUESTED:
+                console.log("Graceful stop: state saved.")
+                break
 
-        # Early stop if requested
-        if STOP_REQUESTED:
-            console.log("Graceful stop: state saved.")
-            break
-
-        iteration += 1
-        if max_iters is not None and iteration >= max_iters:
-            console.log("Reached max_iters limit.")
-            break
+            iteration += 1
+            if max_iters is not None and iteration >= max_iters:
+                console.log("Reached max_iters limit.")
+                break
 
     console.log("GRPO loop complete (placeholder without optimizer step).")
 
