@@ -287,7 +287,10 @@ def train_grpo(model, tokenizer, config):
         inputs = tokenizer(formatted_prompts, return_tensors="pt", padding=True, truncation=True).to(model.device)
         with torch.no_grad():
             outputs = model.generate(**inputs, max_new_tokens=config.get("max_new_tokens", 64))
-        completions = tokenizer.batch_decode(outputs, skip_special_tokens=True)
+        
+        # Slice outputs to only include new tokens
+        new_tokens = outputs[:, inputs["input_ids"].shape[1]:]
+        completions = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
 
         rewards, reasons = score_completions(tasks, completions, config)
         avg_reward = sum(rewards) / max(1, len(rewards))
