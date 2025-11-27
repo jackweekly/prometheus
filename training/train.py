@@ -286,7 +286,14 @@ def train_grpo(model, tokenizer, config):
 
         inputs = tokenizer(formatted_prompts, return_tensors="pt", padding=True, truncation=True).to(model.device)
         with torch.no_grad():
-            outputs = model.generate(**inputs, max_new_tokens=config.get("max_new_tokens", 64))
+            outputs = model.generate(
+                **inputs, 
+                max_new_tokens=config.get("max_new_tokens", 64),
+                temperature=config.get("temperature", 0.7),
+                top_p=config.get("top_p", 0.9),
+                repetition_penalty=config.get("repetition_penalty", 1.0),
+                do_sample=True
+            )
         
         # Slice outputs to only include new tokens
         new_tokens = outputs[:, inputs["input_ids"].shape[1]:]
@@ -348,7 +355,7 @@ def train_grpo(model, tokenizer, config):
                 model=model,
                 args=sft_args,
                 train_dataset=train_ds,
-                tokenizer=tokenizer,
+                processing_class=tokenizer,
             )
             sft_trainer.train()
 
