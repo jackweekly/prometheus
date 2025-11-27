@@ -270,15 +270,21 @@ def train_grpo(model, tokenizer, config):
     iteration = start_iter
     while True:
         tasks = fetch_tasks(config)
-        prompts = []
+        formatted_prompts = []
         for t in tasks:
+            # Construct the user message
+            content = t["prompt"]
             if "tests" in t:
-                prompts.append(t["prompt"] + "\n\nReturn a single fenced python code block with the function only. No extra text.")
+                content += "\n\nReturn a single fenced python code block with the function only. No extra text."
             elif "answer" in t:
-                prompts.append(t["prompt"] + "\n\nReturn only one integer on a single line. No explanation.")
-            else:
-                prompts.append(t["prompt"])
-        inputs = tokenizer(prompts, return_tensors="pt", padding=True, truncation=True).to(model.device)
+                content += "\n\nReturn only one integer on a single line. No explanation."
+            
+            # Apply chat template
+            messages = [{"role": "user", "content": content}]
+            formatted_prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            formatted_prompts.append(formatted_prompt)
+
+        inputs = tokenizer(formatted_prompts, return_tensors="pt", padding=True, truncation=True).to(model.device)
         with torch.no_grad():
             outputs = model.generate(**inputs, max_new_tokens=config.get("max_new_tokens", 64))
         completions = tokenizer.batch_decode(outputs, skip_special_tokens=True)
