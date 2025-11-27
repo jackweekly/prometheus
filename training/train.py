@@ -191,7 +191,7 @@ def fetch_tasks(config, iteration: int = 0) -> List[Dict[str, Any]]:
     return tasks
 
 
-def generate_teacher_tasks(teacher_model, teacher_tokenizer, count: int, device, temperature: float = 0.7) -> List[Dict[str, Any]]:
+def generate_teacher_tasks(teacher_model, teacher_tokenizer, count: int, device, temperature: float = 0.7, avoid_prompts: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """
     Ask teacher to emit tasks in a strict format:
     MATH: <question> | ANSWER: <integer>
@@ -199,11 +199,14 @@ def generate_teacher_tasks(teacher_model, teacher_tokenizer, count: int, device,
     """
     if teacher_model is None or teacher_tokenizer is None:
         return []
+    avoid_prompts = avoid_prompts or []
+    avoid_blob = "\n".join(f"- {p}" for p in avoid_prompts[-20:]) if avoid_prompts else "None"
     prompt = (
         f"Generate {count} diverse programming or math tasks. Strictly one per line. "
         "For math, use: MATH: <question> | ANSWER: <integer>. "
         "For code, use: CODE: <question> | TESTS: <assert1>; <assert2>. "
-        "Do not add explanations or formatting. No markdown."
+        "Do not add explanations or formatting. No markdown. "
+        f"Avoid repeating any of these recent tasks:\n{avoid_blob}"
     )
     messages = [{"role": "user", "content": prompt}]
     inputs = teacher_tokenizer.apply_chat_template(messages, return_tensors="pt", add_generation_prompt=True).to(device)
@@ -238,7 +241,19 @@ def generate_teacher_tasks(teacher_model, teacher_tokenizer, count: int, device,
                     tasks.append({"prompt": question, "tests": tests})
             except Exception:
                 continue
-    return tasks
+    # Deduplicate and drop avoided
+    dedup = []
+    seen = set()
+    avoid_set = set(avoid_prompts or [])
+    for t in tasks:
+        prompt = t["prompt"]
+        if prompt in seen or prompt in avoid_set:
+            continue
+        seen.add(prompt)
+        dedup.append(t)
+        if len(dedup) >= count:
+            break
+    return dedup
 
 
 def compute_reward(task: Dict[str, Any], completion: str) -> Tuple[float, str]:
@@ -320,6 +335,7 @@ def train_grpo(model, tokenizer, config, teacher_model=None, teacher_tokenizer=N
 
     state = load_state()
     start_iter = state.get("iteration", 0)
+    recent_prompts = state.get("recent_prompts", [])
     max_iters = config.get("max_iters")  # None = unbounded
     console.log(f"Resuming at iteration {start_iter}; max_iters={'∞' if max_iters is None else max_iters}")
 
@@ -371,6 +387,7 @@ def train_grpo(model, tokenizer, config, teacher_model=None, teacher_tokenizer=N
                     count=config.get("teacher_task_count", 4),
                     device=teacher_model.device,
                     temperature=config.get("teacher_task_temperature", 0.8),
+                    avoid_prompts=recent_prompts,
                 )
             if not tasks:
                 tasks = fetch_tasks(config, iteration=iteration)
@@ -474,7 +491,9 @@ def train_grpo(model, tokenizer, config, teacher_model=None, teacher_tokenizer=N
             console.print(table) # Print permanently
 
             # Save state so we can resume
-            save_state({"iteration": iteration + 1, "last_avg_reward": avg_reward, "last_tasks": tasks})
+            recent_prompts.extend([t["prompt"] for t in tasks])
+            recent_prompts = recent_prompts[-50:]  # keep last 50
+            save_state({"iteration": iteration + 1, "last_avg_reward": avg_reward, "last_tasks": tasks, "recent_prompts": recent_prompts})
 
             # Self-train on good samples (simple SFT on high-reward completions)
             good_samples = [(p, c) for p, c, r in zip(formatted_prompts, completions, rewards) if r >= 1.0]

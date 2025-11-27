@@ -52,3 +52,4 @@ random_task_count: 4
 # Let the teacher propose tasks each iteration (overrides random tasks)
 teacher_generate_tasks: true
 teacher_task_count: 4
+teacher_task_temperature: 0.8
