@@ -313,7 +313,7 @@ def train_grpo(model, tokenizer, config):
         save_state({"iteration": iteration + 1, "last_avg_reward": avg_reward, "last_tasks": tasks})
 
         # Self-train on good samples (simple SFT on high-reward completions)
-        good_samples = [(p, c) for p, c, r in zip(prompts, completions, rewards) if r >= 1.0]
+        good_samples = [(p, c) for p, c, r in zip(formatted_prompts, completions, rewards) if r >= 1.0]
         if not good_samples:
             console.log("No high-reward samples; skipping self-train this iteration.")
         if good_samples:
