@@ -9,6 +9,7 @@ import requests
 import re
 import signal
 import os
+import random
 from rich.console import Console
 from rich.table import Table
 from torch.utils.data import Dataset
@@ -158,16 +159,25 @@ def fetch_tasks(config) -> List[Dict[str, Any]]:
     if research_items:
         return research_items
 
-    # Fallback tasks
-    return [
-        {"prompt": "Compute 17 * 23.", "answer": "391"},
-        {
-            "prompt": "Write a Python function add(a, b) that returns their sum.",
-            "answer": "def add(a, b):\n    return a + b",
-            "tests": ["assert add(1,2)==3", "assert add(-1,1)==0"],
-        },
-        {"prompt": "What is the capital of France?", "answer": "Paris"},
+    # Synthetic random tasks
+    tasks = []
+    count = config.get("random_task_count", 4)
+    ops = [("+", lambda a, b: a + b), ("-", lambda a, b: a - b), ("*", lambda a, b: a * b)]
+    code_tasks = [
+        ("sum_list", "Write a Python function sum_list(nums) that returns the sum of a list of integers.", ["assert sum_list([1,2,3])==6", "assert sum_list([-1,1,0])==0"]),
+        ("reverse_string", "Write a Python function reverse_string(s) that returns the string reversed.", ["assert reverse_string('abc')=='cba'", "assert reverse_string('')==''"]),
+        ("factorial", "Write a Python function factorial(n) that returns n! for n>=0.", ["assert factorial(0)==1", "assert factorial(5)==120"]),
     ]
+    for _ in range(count):
+        if random.random() < 0.5:
+            a, b = random.randint(2, 99), random.randint(2, 99)
+            op, fn = random.choice(ops)
+            ans = fn(a, b)
+            tasks.append({"prompt": f"Compute {a} {op} {b}.", "answer": str(ans)})
+        else:
+            name, prompt, tests = random.choice(code_tasks)
+            tasks.append({"prompt": prompt, "tests": tests})
+    return tasks
 
 
 def compute_reward(task: Dict[str, Any], completion: str) -> Tuple[float, str]:
