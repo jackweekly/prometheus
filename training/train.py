@@ -264,7 +264,7 @@ def train_grpo(model, tokenizer, config, teacher_model=None, teacher_tokenizer=N
         max_prompt_length = 512,
         max_completion_length = 1024,
         num_generations = config.get('group_size', 4),
-        report_to = "wandb",
+        report_to = "none",
         dataloader_num_workers = config.get('dataloader_num_workers', 4),
     )
 
@@ -295,13 +295,13 @@ def train_grpo(model, tokenizer, config, teacher_model=None, teacher_tokenizer=N
             tasks = fetch_tasks(config)
             formatted_prompts = []
             for t in tasks:
-                # ... (prompt formatting) ...
                 # Construct the user message
                 content = t["prompt"]
+                content += "\n\nReason step-by-step before providing your final answer." # Enforce CoT
                 if "tests" in t:
-                    content += "\n\nReturn a single fenced python code block with the function only. No extra text."
+                    content += "\nReturn a single fenced python code block with the function only. No extra text."
                 elif "answer" in t:
-                    content += "\n\nReturn only one integer on a single line. No explanation."
+                    content += "\nReturn only one integer on a single line. No explanation."
                 
                 # Apply chat template
                 messages = [{"role": "user", "content": content}]
@@ -313,7 +313,7 @@ def train_grpo(model, tokenizer, config, teacher_model=None, teacher_tokenizer=N
             with torch.no_grad():
                 outputs = model.generate(
                     **inputs, 
-                    max_new_tokens=config.get("max_new_tokens", 64),
+                    max_new_tokens=config.get("max_new_tokens", 256), # Increased default for CoT
                     temperature=config.get("temperature", 0.7),
                     top_p=config.get("top_p", 0.9),
                     repetition_penalty=config.get("repetition_penalty", 1.0),
@@ -349,7 +349,7 @@ def train_grpo(model, tokenizer, config, teacher_model=None, teacher_tokenizer=N
                         with torch.no_grad():
                             teacher_outputs = teacher_model.generate(
                                 teacher_inputs, 
-                                max_new_tokens=256, 
+                                max_new_tokens=512, # More room for teacher thought
                                 temperature=0.6,
                                 do_sample=True
                             )
@@ -419,6 +419,7 @@ def train_grpo(model, tokenizer, config, teacher_model=None, teacher_tokenizer=N
                     save_strategy="no",
                     remove_unused_columns=False,
                     gradient_checkpointing=True,
+                    report_to="none", # Disable wandb for SFT too
                 )
                 sft_trainer = Trainer(
                     model=model,
@@ -485,7 +486,7 @@ def train_grpo(model, tokenizer, config, teacher_model=None, teacher_tokenizer=N
         with torch.no_grad():
             advice_outputs = teacher_model.generate(
                 advice_inputs, 
-                max_new_tokens=256, 
+                max_new_tokens=1024, # Increased for full reasoning
                 temperature=0.7,
                 do_sample=True
             )
