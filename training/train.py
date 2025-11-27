@@ -461,13 +461,22 @@ def main():
     teacher_model = None
     teacher_tokenizer = None
     if config.get("teacher_model_name"):
-        console.log(f"Loading Teacher: {config['teacher_model_name']} on {config.get('teacher_device', 'cuda:1')}")
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        console.log(f"Loading Teacher: {config['teacher_model_name']} on {config.get('teacher_device', 'cuda:1')} (4-bit quantized)")
+        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+        
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+        )
+        
         teacher_tokenizer = AutoTokenizer.from_pretrained(config["teacher_model_name"])
         teacher_model = AutoModelForCausalLM.from_pretrained(
             config["teacher_model_name"], 
-            torch_dtype=torch.bfloat16,
-            device_map=config.get("teacher_device", "cuda:1")
+            quantization_config=bnb_config,
+            device_map=config.get("teacher_device", "cuda:1"),
+            low_cpu_mem_usage=True
         )
 
     target_modules = config.get(
