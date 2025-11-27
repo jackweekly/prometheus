@@ -49,3 +49,6 @@ self_train_batch_size: 1
 self_train_lr: 2e-6
 # Synthetic task generation (used when no task_url or research tasks)
 random_task_count: 4
+# Let the teacher propose tasks each iteration (overrides random tasks)
+teacher_generate_tasks: true
+teacher_task_count: 4

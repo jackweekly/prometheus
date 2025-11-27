@@ -139,7 +139,7 @@ def fetch_research(config) -> List[Dict[str, Any]]:
     return tasks
 
 
-def fetch_tasks(config) -> List[Dict[str, Any]]:
+def fetch_tasks(config, iteration: int = 0) -> List[Dict[str, Any]]:
     """
     Task source: tries HTTP if task_url provided; then research feeds; falls back to built-in tasks.
     Expects JSON list of {prompt: str, answer: str, tests?: [str]}.
@@ -162,21 +162,82 @@ def fetch_tasks(config) -> List[Dict[str, Any]]:
     # Synthetic random tasks
     tasks = []
     count = config.get("random_task_count", 4)
+    rng = random.Random(iteration + 1337)
+
     ops = [("+", lambda a, b: a + b), ("-", lambda a, b: a - b), ("*", lambda a, b: a * b)]
     code_tasks = [
         ("sum_list", "Write a Python function sum_list(nums) that returns the sum of a list of integers.", ["assert sum_list([1,2,3])==6", "assert sum_list([-1,1,0])==0"]),
         ("reverse_string", "Write a Python function reverse_string(s) that returns the string reversed.", ["assert reverse_string('abc')=='cba'", "assert reverse_string('')==''"]),
         ("factorial", "Write a Python function factorial(n) that returns n! for n>=0.", ["assert factorial(0)==1", "assert factorial(5)==120"]),
+        ("is_palindrome", "Write a Python function is_palindrome(s) that returns True if s is a palindrome.", ["assert is_palindrome('aba')", "assert not is_palindrome('abc')"]),
+        ("fizzbuzz", "Write a Python function fizzbuzz(n) that returns a list of strings for 1..n with Fizz/Buzz rules.", ["assert fizzbuzz(3)==['1','2','Fizz']", "assert fizzbuzz(5)[-1]=='Buzz'"]),
     ]
-    for _ in range(count):
-        if random.random() < 0.5:
-            a, b = random.randint(2, 99), random.randint(2, 99)
-            op, fn = random.choice(ops)
-            ans = fn(a, b)
-            tasks.append({"prompt": f"Compute {a} {op} {b}.", "answer": str(ans)})
-        else:
-            name, prompt, tests = random.choice(code_tasks)
-            tasks.append({"prompt": prompt, "tests": tests})
+
+    # Ensure variety: half math, half code (as possible)
+    math_needed = max(1, count // 2)
+    code_needed = count - math_needed
+
+    for _ in range(math_needed):
+        a, b = rng.randint(2, 99), rng.randint(2, 99)
+        op, fn = rng.choice(ops)
+        ans = fn(a, b)
+        tasks.append({"prompt": f"Compute {a} {op} {b}.", "answer": str(ans)})
+
+    rng.shuffle(code_tasks)
+    for name, prompt, tests in code_tasks[:code_needed]:
+        tasks.append({"prompt": prompt, "tests": tests})
+
+    rng.shuffle(tasks)
+    return tasks
+
+
+def generate_teacher_tasks(teacher_model, teacher_tokenizer, count: int, device, temperature: float = 0.7) -> List[Dict[str, Any]]:
+    """
+    Ask teacher to emit tasks in a strict format:
+    MATH: <question> | ANSWER: <integer>
+    CODE: <question> | TESTS: <assert1>; <assert2>
+    """
+    if teacher_model is None or teacher_tokenizer is None:
+        return []
+    prompt = (
+        f"Generate {count} diverse programming or math tasks. Strictly one per line. "
+        "For math, use: MATH: <question> | ANSWER: <integer>. "
+        "For code, use: CODE: <question> | TESTS: <assert1>; <assert2>. "
+        "Do not add explanations or formatting. No markdown."
+    )
+    messages = [{"role": "user", "content": prompt}]
+    inputs = teacher_tokenizer.apply_chat_template(messages, return_tensors="pt", add_generation_prompt=True).to(device)
+    with torch.no_grad():
+        outputs = teacher_model.generate(
+            inputs,
+            max_new_tokens=512,
+            temperature=temperature,
+            do_sample=True,
+        )
+    text = teacher_tokenizer.decode(outputs[0][inputs.shape[1]:], skip_special_tokens=True)
+    tasks = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.upper().startswith("MATH:") and "| ANSWER:" in line.upper():
+            try:
+                q_part, a_part = line.split("|", 1)
+                question = q_part.split(":", 1)[1].strip()
+                answer = a_part.split(":", 1)[1].strip()
+                tasks.append({"prompt": question, "answer": answer})
+            except Exception:
+                continue
+        elif line.upper().startswith("CODE:") and "| TESTS:" in line.upper():
+            try:
+                q_part, t_part = line.split("|", 1)
+                question = q_part.split(":", 1)[1].strip()
+                tests_raw = t_part.split(":", 1)[1].strip()
+                tests = [t.strip() for t in tests_raw.split(";") if t.strip()]
+                if tests:
+                    tasks.append({"prompt": question, "tests": tests})
+            except Exception:
+                continue
     return tasks
 
 
@@ -302,7 +363,17 @@ def train_grpo(model, tokenizer, config, teacher_model=None, teacher_tokenizer=N
         while True:
             # ... (fetching tasks) ...
             live.update(Panel(f"Fetching tasks for Iteration {iteration}...", title="Status", style="blue"))
-            tasks = fetch_tasks(config)
+            tasks = []
+            if config.get("teacher_generate_tasks", False) and teacher_model:
+                tasks = generate_teacher_tasks(
+                    teacher_model,
+                    teacher_tokenizer,
+                    count=config.get("teacher_task_count", 4),
+                    device=teacher_model.device,
+                    temperature=config.get("teacher_task_temperature", 0.8),
+                )
+            if not tasks:
+                tasks = fetch_tasks(config, iteration=iteration)
             formatted_prompts = []
             for t in tasks:
                 # Construct the user message
