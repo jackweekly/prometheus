@@ -36,6 +36,8 @@ log_samples: true
 log_samples_limit: 2
 # Log reward reasons for transparency
 log_reasons: true
+# When true, show full prompt/completion in logs (no truncation)
+log_full_prompts: true
 # Max new tokens per completion (shorter encourages direct answers)
 max_new_tokens: 64
 temperature: 0.6

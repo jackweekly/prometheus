@@ -378,22 +378,26 @@ def train_grpo(model, tokenizer, config, teacher_model=None, teacher_tokenizer=N
             
             # Create summary table
             table = Table(title=f"Iteration {iteration} Summary (Avg Reward: {avg_reward:.2f})", box=None)
-            table.add_column("Task", style="cyan", no_wrap=True)
+            table.add_column("Task", style="cyan")
             table.add_column("Completion", style="white")
             table.add_column("Reward", justify="right")
             table.add_column("Source", style="italic")
 
+            max_rows = config.get("log_samples_limit", 3)
+            full = config.get("log_full_prompts", False)
+
             for i, (task, comp, rw, reason) in enumerate(zip(tasks, completions, rewards, reasons)):
-                if i >= config.get("log_samples_limit", 3): break
-                
-                # Truncate for display
-                prompt_short = task.get("prompt", "")[:40].replace("\n", " ") + "..."
-                comp_short = comp.strip()[:40].replace("\n", " ") + "..."
-                
+                if i >= max_rows:
+                    break
+                prompt_text = task.get("prompt", "").strip().replace("\t", "    ")
+                comp_text = comp.strip()
+                if not full:
+                    prompt_text = (prompt_text[:200] + "...") if len(prompt_text) > 200 else prompt_text
+                    comp_text = (comp_text[:200] + "...") if len(comp_text) > 200 else comp_text
+
                 reward_style = "green" if rw >= 1.0 else "red"
                 source = "Teacher" if "Teacher" in str(reason) else "Student"
-                
-                table.add_row(prompt_short, comp_short, f"[{reward_style}]{rw:.1f}[/{reward_style}]", source)
+                table.add_row(prompt_text, comp_text, f"[{reward_style}]{rw:.1f}[/{reward_style}]", source)
             
             live.update(table)
             console.print(table) # Print permanently
