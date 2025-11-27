@@ -55,6 +55,11 @@ def save_state(data: Dict[str, Any], path: str = STATE_PATH):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
+
+def normalize_prompt(text: str) -> str:
+    """Lowercase and collapse whitespace for comparison/dedup."""
+    return re.sub(r"\s+", " ", text.strip().lower())
+
 # --- Ternary helpers ---
 def ternary_weight(w: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
     """Absmean scaling + STE ternary projection to {-1, 0, 1}."""
@@ -244,12 +249,13 @@ def generate_teacher_tasks(teacher_model, teacher_tokenizer, count: int, device,
     # Deduplicate and drop avoided
     dedup = []
     seen = set()
-    avoid_set = set(avoid_prompts or [])
+    avoid_set = set(normalize_prompt(p) for p in (avoid_prompts or []))
     for t in tasks:
         prompt = t["prompt"]
-        if prompt in seen or prompt in avoid_set:
+        norm = normalize_prompt(prompt)
+        if norm in seen or norm in avoid_set:
             continue
-        seen.add(prompt)
+        seen.add(norm)
         dedup.append(t)
         if len(dedup) >= count:
             break
@@ -389,6 +395,10 @@ def train_grpo(model, tokenizer, config, teacher_model=None, teacher_tokenizer=N
                     temperature=config.get("teacher_task_temperature", 0.8),
                     avoid_prompts=recent_prompts,
                 )
+                # If not enough tasks, backfill with synthetic ones for variety
+                if tasks and len(tasks) < config.get("teacher_task_count", 4):
+                    extra = fetch_tasks(config, iteration=iteration)
+                    tasks.extend(extra[: (config.get("teacher_task_count", 4) - len(tasks))])
             if not tasks:
                 tasks = fetch_tasks(config, iteration=iteration)
             formatted_prompts = []
@@ -491,7 +501,7 @@ def train_grpo(model, tokenizer, config, teacher_model=None, teacher_tokenizer=N
             console.print(table) # Print permanently
 
             # Save state so we can resume
-            recent_prompts.extend([t["prompt"] for t in tasks])
+            recent_prompts.extend([normalize_prompt(t["prompt"]) for t in tasks])
             recent_prompts = recent_prompts[-50:]  # keep last 50
             save_state({"iteration": iteration + 1, "last_avg_reward": avg_reward, "last_tasks": tasks, "recent_prompts": recent_prompts})
 
