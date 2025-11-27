@@ -1,7 +1,65 @@
-import argparse
-import yaml
-import torch
-from trl import GRPOConfig, GRPOTrainer
+    # Suppress warnings
+    import logging
+    logging.getLogger("transformers").setLevel(logging.ERROR)
+    import warnings
+    warnings.filterwarnings("ignore")
+
+    from rich.live import Live
+    from rich.panel import Panel
+    from rich.text import Text
+
+    # ... (inside loop) ...
+    
+    iteration = start_iter
+    with Live(console=console, refresh_per_second=4) as live:
+        while True:
+            live.update(Panel(f"Fetching tasks for Iteration {iteration}...", title="Status", style="blue"))
+            tasks = fetch_tasks(config)
+            
+            # ... (formatting prompts) ...
+            
+            live.update(Panel(f"Student generating on {len(tasks)} tasks...", title="Status", style="yellow"))
+            inputs = tokenizer(formatted_prompts, return_tensors="pt", padding=True, truncation=True).to(model.device)
+            with torch.no_grad():
+                outputs = model.generate(...) # (keep existing args)
+            
+            # ... (decoding) ...
+            
+            rewards, reasons = score_completions(tasks, completions, config)
+
+            # Teacher Correction
+            if teacher_model:
+                for i, (r, t) in enumerate(zip(rewards, tasks)):
+                    if r < 1.0:
+                        live.update(Panel(f"Teacher correcting task {i+1}/{len(tasks)}...", title="Status", style="magenta"))
+                        # ... (teacher generation logic) ...
+                        reasons[i] = "[green]Teacher Corrected[/green]" # Color code
+
+            avg_reward = sum(rewards) / max(1, len(rewards))
+            
+            # Create summary table
+            table = Table(title=f"Iteration {iteration} Summary (Avg Reward: {avg_reward:.2f})", box=None)
+            table.add_column("Task", style="cyan", no_wrap=True)
+            table.add_column("Completion", style="white")
+            table.add_column("Reward", justify="right")
+            table.add_column("Source", style="italic")
+
+            for i, (task, comp, rw, reason) in enumerate(zip(tasks, completions, rewards, reasons)):
+                if i >= config.get("log_samples_limit", 3): break
+                
+                # Truncate for display
+                prompt_short = task.get("prompt", "")[:40].replace("\n", " ") + "..."
+                comp_short = comp.strip()[:40].replace("\n", " ") + "..."
+                
+                reward_style = "green" if rw >= 1.0 else "red"
+                source = "Teacher" if "Teacher" in reason else "Student"
+                
+                table.add_row(prompt_short, comp_short, f"[{reward_style}]{rw:.1f}[/{reward_style}]", source)
+            
+            live.update(table)
+            console.print(table) # Print permanently
+            
+            # ... (rest of loop) ...
 from transformers import TrainingArguments, Trainer
 from typing import List, Dict, Any, Optional, Tuple
 import json
