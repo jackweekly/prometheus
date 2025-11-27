@@ -279,12 +279,23 @@ def train_grpo(model, tokenizer, config, teacher_model=None, teacher_tokenizer=N
     global STOP_REQUESTED
     iteration = start_iter
     
+    # Stats tracking
+    session_stats = {
+        "iterations": 0,
+        "teacher_interventions": 0,
+        "student_successes": 0,
+        "total_tasks": 0,
+        "reward_history": []
+    }
+
     with Live(console=console, refresh_per_second=4) as live:
         while True:
+            # ... (fetching tasks) ...
             live.update(Panel(f"Fetching tasks for Iteration {iteration}...", title="Status", style="blue"))
             tasks = fetch_tasks(config)
             formatted_prompts = []
             for t in tasks:
+                # ... (prompt formatting) ...
                 # Construct the user message
                 content = t["prompt"]
                 if "tests" in t:
@@ -315,10 +326,16 @@ def train_grpo(model, tokenizer, config, teacher_model=None, teacher_tokenizer=N
 
             rewards, reasons = score_completions(tasks, completions, config)
 
+            # Update stats (pre-teacher)
+            session_stats["total_tasks"] += len(tasks)
+            student_wins = sum(1 for r in rewards if r >= 1.0)
+            session_stats["student_successes"] += student_wins
+
             # Teacher Correction (Critic/Teacher)
             if teacher_model:
                 for i, (r, t) in enumerate(zip(rewards, tasks)):
                     if r < 1.0: # Student failed
+                        session_stats["teacher_interventions"] += 1
                         live.update(Panel(f"Teacher correcting task {i+1}/{len(tasks)}...", title="Status", style="magenta"))
                         # Format for Teacher
                         teacher_messages = [{"role": "user", "content": t["prompt"]}]
@@ -346,6 +363,8 @@ def train_grpo(model, tokenizer, config, teacher_model=None, teacher_tokenizer=N
                         reasons[i] = "[green]Teacher Corrected[/green]"
 
             avg_reward = sum(rewards) / max(1, len(rewards))
+            session_stats["reward_history"].append(avg_reward)
+            session_stats["iterations"] += 1
             
             # Create summary table
             table = Table(title=f"Iteration {iteration} Summary (Avg Reward: {avg_reward:.2f})", box=None)
@@ -419,7 +438,34 @@ def train_grpo(model, tokenizer, config, teacher_model=None, teacher_tokenizer=N
                 console.log("Reached max_iters limit.")
                 break
 
-    console.log("GRPO loop complete (placeholder without optimizer step).")
+    # Session Report
+    console.print("\n")
+    console.rule("[bold green]Parent-Teacher Conference Report[/bold green]")
+    
+    total_tasks = session_stats["total_tasks"]
+    if total_tasks > 0:
+        independence_rate = (session_stats["student_successes"] / total_tasks) * 100
+        intervention_rate = (session_stats["teacher_interventions"] / total_tasks) * 100
+    else:
+        independence_rate = 0
+        intervention_rate = 0
+        
+    report_table = Table(show_header=False, box=None)
+    report_table.add_row("Total Iterations", str(session_stats["iterations"]))
+    report_table.add_row("Total Tasks Attempted", str(total_tasks))
+    report_table.add_row("Student Successes (Independent)", f"[green]{session_stats['student_successes']}[/green]")
+    report_table.add_row("Teacher Interventions", f"[yellow]{session_stats['teacher_interventions']}[/yellow]")
+    report_table.add_row("Student Independence Rate", f"[bold blue]{independence_rate:.1f}%[/bold blue]")
+    
+    console.print(report_table)
+    
+    if session_stats["reward_history"]:
+        start_reward = session_stats["reward_history"][0]
+        end_reward = session_stats["reward_history"][-1]
+        console.print(f"\nReward Trend: {start_reward:.2f} -> {end_reward:.2f}")
+        
+    console.rule("[bold green]End of Session[/bold green]")
+    console.log("GRPO loop complete.")
 
 def main():
     parser = argparse.ArgumentParser(description="Jamba-only GRPO Training Script")
